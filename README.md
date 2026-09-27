@@ -122,10 +122,13 @@ converts to White's point of view for display.
 
 ## Licences
 
-This project is released under the GNU GPL v3 or later (see `LICENSE`)
-because it is built on GPL components: the engine is
+This project's own code is released under the MIT licence (see `LICENSE`).
+It depends on GPL-licensed components that are installed from npm and served
+to the browser at runtime: the engine is
 [Stockfish.js](https://github.com/nmrugg/stockfish.js) (GPL-3.0) and the
 board is [chessground](https://github.com/lichess-org/chessground)
-(GPL-3.0-or-later). Move generation uses [chess.js](https://github.com/jhlywa/chess.js)
-(BSD-2-Clause). The opening book is the lichess
-[chess-openings](https://github.com/lichess-org/chess-openings) data (CC0).
+(GPL-3.0-or-later). If you redistribute a bundle that includes them, their
+licences apply to that bundle. Move generation uses
+[chess.js](https://github.com/jhlywa/chess.js) (BSD-2-Clause). The opening
+book is the lichess [chess-openings](https://github.com/lichess-org/chess-openings)
+data (CC0).

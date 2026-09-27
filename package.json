@@ -19,5 +19,5 @@
     "chess.js": "^1.4.0",
     "stockfish": "^19.0.0"
   },
-  "license": "GPL-3.0-or-later"
+  "license": "MIT"
 }
