@@ -3,6 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#fcfcfb">
+  <!-- Apply a saved light/dark choice before the stylesheet paints, so there is no flash. -->
+  <script>try { var t = localStorage.getItem('theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
   <title>Opening Study</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%232a78d6'/%3E%3Ctext x='16' y='23' font-size='20' text-anchor='middle' fill='white'%3E%E2%99%9E%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="/vendor/chessground/assets/chessground.base.css">
@@ -14,11 +17,18 @@
   <header class="topbar">
     <h1>Opening Study</h1>
     <nav class="tabs" role="tablist">
-      <button class="tab active" data-tab="explore" role="tab">Explore</button>
-      <button class="tab" data-tab="study" role="tab">Study</button>
-      <button class="tab" data-tab="analysis" role="tab">Analysis</button>
+      <button class="tab active" data-tab="explore" role="tab" aria-selected="true">Explore</button>
+      <button class="tab" data-tab="study" role="tab" aria-selected="false">Study</button>
+      <button class="tab" data-tab="analysis" role="tab" aria-selected="false">Analysis</button>
     </nav>
-    <div class="topbar-status" id="engine-status" title="Browser engine status">engine: loading…</div>
+    <div class="topbar-right">
+      <div class="topbar-status" id="engine-status" title="Browser engine status">engine: loading…</div>
+      <div class="seg" role="radiogroup" aria-label="Colour theme" id="theme-seg">
+        <button type="button" role="radio" aria-checked="true" data-theme-choice="auto" title="Follow the system setting">Auto</button>
+        <button type="button" role="radio" aria-checked="false" data-theme-choice="light" title="Always light">Light</button>
+        <button type="button" role="radio" aria-checked="false" data-theme-choice="dark" title="Always dark">Dark</button>
+      </div>
+    </div>
   </header>
 
   <main class="layout">
@@ -74,13 +84,19 @@
         <div class="position-meta" id="position-meta"></div>
       </div>
       <div class="controls">
-        <button class="btn icon" id="nav-start" title="Start (Home)">⏮</button>
-        <button class="btn icon" id="nav-back" title="Back (←)">◀</button>
-        <button class="btn icon" id="nav-fwd" title="Forward (→)">▶</button>
-        <button class="btn icon" id="nav-end" title="End (End)">⏭</button>
-        <button class="btn icon" id="flip" title="Flip board (f)">⇅</button>
+        <button class="btn icon" id="nav-start" title="Start (Home)" aria-label="Go to the starting position (Home)">⏮</button>
+        <button class="btn icon" id="nav-back" title="Back (←)" aria-label="One move back (Left arrow)">◀</button>
+        <button class="btn icon" id="nav-fwd" title="Forward (→)" aria-label="One move forward (Right arrow)">▶</button>
+        <button class="btn icon" id="nav-end" title="End (End)" aria-label="Go to the end of the line (End)">⏭</button>
+        <button class="btn icon" id="flip" title="Flip board (f)" aria-label="Flip the board (f)">⇅</button>
         <label class="toggle"><input type="checkbox" id="engine-toggle" checked> engine</label>
         <label class="toggle"><input type="checkbox" id="arrows-toggle" checked> book arrows</label>
+        <span class="share" role="group" aria-label="Copy the position">
+          <span class="hint">copy</span>
+          <button class="btn small" id="copy-link" title="Copy a link that opens this position">link</button>
+          <button class="btn small" id="copy-pgn" title="Copy the moves on the board as PGN">PGN</button>
+          <button class="btn small" id="copy-fen" title="Copy the position as FEN">FEN</button>
+        </span>
       </div>
       <div class="moves" id="moves"></div>
       <div class="drill-box" id="drill-box" hidden></div>
@@ -110,6 +126,12 @@
         <div class="btn-row">
           <button class="btn" id="add-subtree" title="Add every variation below this position to the study set">+ all variations below…</button>
           <button class="btn" id="deepen-here" title="Ask the server to deepen every book position below this one first">deepen from here</button>
+        </div>
+        <div class="chooser" id="subtree-chooser" hidden>
+          <span id="subtree-chooser-text"></span>
+          <button class="btn small" id="subtree-white">as White</button>
+          <button class="btn small" id="subtree-black">as Black</button>
+          <button class="link" id="subtree-cancel">cancel</button>
         </div>
       </section>
 
@@ -165,6 +187,8 @@
       <div class="tooltip" id="tooltip" hidden></div>
     </section>
   </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
   <script type="module" src="/app.js"></script>
 </body>

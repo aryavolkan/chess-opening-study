@@ -3,7 +3,7 @@
 // screen is derived from the position at the cursor.
 
 import { Chess } from '/vendor/chess.js/chess.js';
-import { parseOpeningsTsv, buildBook, findNode, pathOf, nearestName, searchOpenings, walk } from '/shared/book.js';
+import { parseOpeningsTsv, buildBook, findNode, pathOf, nearestName, searchOpenings, walk, sanToPgn } from '/shared/book.js';
 import { epdOf, sideToMove, fenFromEpd } from '/shared/fen.js';
 import { formatScore, scoreForWhite, winningChances } from '/shared/uci.js';
 import { api } from '/api.js';
@@ -12,11 +12,15 @@ import { EngineClient } from '/engine-client.js';
 import { renderTree, describeEval, resetColorCache, stripFamily } from '/tree.js';
 import { renderEcoMap } from '/eco-map.js';
 import { Drill } from '/study.js';
+import { initTheme } from '/theme.js';
+import { createPrefs } from '/prefs.js';
 
 const MAX_BROWSER_DEPTH = 26;
 const MULTIPV = 3;
 
 const $ = (id) => document.getElementById(id);
+const prefs = createPrefs();
+const clampDepth = (v) => Math.max(1, Math.min(12, Number(v) || 4));
 
 const state = {
   openings: [],
@@ -25,8 +29,8 @@ const state = {
   cursor: 0,         // number of moves played from the start
   chess: new Chess(),
   orientation: 'white',
-  engineOn: true,
-  arrowsOn: true,
+  engineOn: prefs.get('engineOn', true) !== false,
+  arrowsOn: prefs.get('arrowsOn', true) !== false,
   live: null,        // latest snapshot from the browser engine for the current epd
   liveEpd: null,
   analysis: new Map(),   // epd -> stored record (null when known to be absent)
@@ -37,7 +41,7 @@ const state = {
   ecoFilter: null,
   ecoCodes: {},
   treePinned: null,
-  treeDepth: 4,
+  treeDepth: clampDepth(prefs.get('treeDepth', 4)),
   treeExpanded: new Set(),
   study: [],
   drillActive: false,
@@ -288,6 +292,8 @@ async function maybeSave(epd, snap, final) {
 let treeTimer = null;
 function render() {
   state.chess = replay(state.line.slice(0, state.cursor));
+  syncUrl();
+  $('subtree-chooser').hidden = true;
   renderBoard();
   renderMoves();
   renderHead();
@@ -297,6 +303,16 @@ function render() {
   renderList();
   scheduleTree();
   analyseCurrent();
+}
+
+/** Keep ?moves= in the address bar equal to the position on the board, so the link can be shared. */
+function syncUrl() {
+  const sans = state.line.slice(0, state.cursor);
+  const url = new URL(location.href);
+  if (sans.length) url.searchParams.set('moves', sans.join(' '));
+  else url.searchParams.delete('moves');
+  const next = url.pathname + url.search + url.hash;
+  if (next !== location.pathname + location.search + location.hash) history.replaceState(null, '', next);
 }
 
 function renderBoard() {
@@ -663,13 +679,19 @@ async function addStudyLine(color) {
   }
 }
 
-async function addSubtree() {
+function addSubtree() {
   const node = currentNode();
   if (!node) return;
   const leaves = [];
   walk(node, (n) => { if (n.children.size === 0 || n.openings.length) leaves.push(n); });
-  const color = window.prompt(`Add ${leaves.length} variations below this position to the study set. Play them as "white" or "black"?`, 'white');
-  if (color !== 'white' && color !== 'black') return;
+  $('subtree-chooser-text').textContent = `Add ${leaves.length} variation${leaves.length === 1 ? '' : 's'} below this position, drilled`;
+  $('subtree-white').onclick = () => addLeaves(leaves, 'white');
+  $('subtree-black').onclick = () => addLeaves(leaves, 'black');
+  $('subtree-chooser').hidden = false;
+}
+
+async function addLeaves(leaves, color) {
+  $('subtree-chooser').hidden = true;
   let added = 0;
   for (const leaf of leaves) {
     const named = nearestName(leaf);
@@ -801,7 +823,11 @@ async function contributeLoop() {
 
 function setTab(tab) {
   state.tab = tab;
-  document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.tab').forEach((b) => {
+    const on = b.dataset.tab === tab;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', String(on));
+  });
   $('panel-explore-list').hidden = tab !== 'explore';
   $('panel-study-list').hidden = tab !== 'study';
   $('panel-analysis-stats').hidden = tab !== 'analysis';
@@ -824,11 +850,31 @@ function hideTooltip() { $('tooltip').hidden = true; }
 
 let flashTimer;
 function flash(msg) {
-  const el = $('engine-status');
-  const prev = el.textContent;
+  const el = $('toast');
   el.textContent = msg;
+  el.hidden = false;
   clearTimeout(flashTimer);
-  flashTimer = setTimeout(() => { el.textContent = prev; }, 2500);
+  flashTimer = setTimeout(() => { el.hidden = true; }, 2500);
+}
+
+/** Clipboard API where available (https, localhost); a hidden textarea elsewhere (plain http on a LAN). */
+async function copyText(text, what) {
+  let ok = false;
+  try {
+    await navigator.clipboard.writeText(text);
+    ok = true;
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    ta.remove();
+  }
+  flash(ok ? `${what} copied` : `Could not copy the ${what}`);
 }
 
 function esc(s) {
@@ -843,8 +889,15 @@ function bind() {
   $('nav-fwd').onclick = () => goTo(state.cursor + 1);
   $('nav-end').onclick = () => goTo(state.line.length);
   $('flip').onclick = () => { state.orientation = state.orientation === 'white' ? 'black' : 'white'; renderBoard(); };
-  $('engine-toggle').onchange = (e) => { state.engineOn = e.target.checked; state.live = null; state.liveEpd = null; render(); };
-  $('arrows-toggle').onchange = (e) => { state.arrowsOn = e.target.checked; renderBoard(); };
+  $('engine-toggle').checked = state.engineOn;
+  $('arrows-toggle').checked = state.arrowsOn;
+  $('tree-depth').value = state.treeDepth;
+  $('engine-toggle').onchange = (e) => { state.engineOn = e.target.checked; prefs.set('engineOn', state.engineOn); state.live = null; state.liveEpd = null; render(); };
+  $('arrows-toggle').onchange = (e) => { state.arrowsOn = e.target.checked; prefs.set('arrowsOn', state.arrowsOn); renderBoard(); };
+  $('copy-link').onclick = () => copyText(location.href, 'link');
+  $('copy-pgn').onclick = () => copyText(sanToPgn(state.line.slice(0, state.cursor)), 'PGN');
+  $('copy-fen').onclick = () => copyText(state.chess.fen(), 'FEN');
+  $('subtree-cancel').onclick = () => { $('subtree-chooser').hidden = true; };
   $('search').oninput = (e) => { state.search = e.target.value; state.ecoFilter = null; renderList(); renderEcoMapNow(); };
   $('eco-clear').onclick = () => { state.ecoFilter = null; renderList(); renderEcoMapNow(); };
   $('add-white').onclick = () => addStudyLine('white');
@@ -871,7 +924,7 @@ function bind() {
   };
   $('drill-all').onclick = () => startDrill(state.study);
   $('tree-pin').onchange = (e) => { state.treePinned = e.target.checked ? treeRoot() : null; renderTreeNow(); };
-  $('tree-depth').onchange = (e) => { state.treeDepth = Math.max(1, Math.min(12, Number(e.target.value) || 4)); renderTreeNow(); };
+  $('tree-depth').onchange = (e) => { state.treeDepth = clampDepth(e.target.value); prefs.set('treeDepth', state.treeDepth); renderTreeNow(); };
   $('tree-up').onclick = () => {
     const root = treeRoot();
     if (root.parent) { state.treePinned = root.parent; $('tree-pin').checked = true; renderTreeNow(); }
@@ -904,7 +957,17 @@ function bind() {
     else if (e.key === 'End') goTo(state.line.length);
     else if (e.key === 'f') $('flip').click();
   });
-  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { resetColorCache(); renderTreeNow(); });
+  // Theme: the tree caches resolved colours, so it is redrawn whenever the shown theme changes.
+  const theme = initTheme({ onChange: () => { resetColorCache(); renderTreeNow(); } });
+  const seg = $('theme-seg');
+  const syncSeg = () => seg.querySelectorAll('[data-theme-choice]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.themeChoice === theme.preference)));
+  seg.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-theme-choice]');
+    if (!b) return;
+    theme.set(b.dataset.themeChoice);
+    syncSeg();
+  });
+  syncSeg();
   setInterval(() => { if (state.tab === 'analysis') { refreshDeepen(); } }, 3000);
   setInterval(() => { if (state.tab === 'analysis') refreshStats(); }, 15000);
 }

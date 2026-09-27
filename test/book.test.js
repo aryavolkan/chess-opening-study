@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseOpeningsTsv, pgnToSan, buildBook, findNode, pathOf, leafCount, nearestName, searchOpenings, serialize, ecoIndex } from '../shared/book.js';
+import { parseOpeningsTsv, pgnToSan, sanToPgn, buildBook, findNode, pathOf, leafCount, nearestName, searchOpenings, serialize, ecoIndex } from '../shared/book.js';
 import { loadOpenings, positionsUnderPrefix } from '../server/openings.js';
 
 const TSV = `eco\tname\tpgn
@@ -58,4 +58,11 @@ test('the vendored book loads, every move is legal and positions are keyed by EP
   assert.ok(under.length > 5);
   assert.ok(under.every((p) => p.san.slice(0, 10).join(' ') === 'e4 c5 Nf3 d6 d4 cxd4 Nxd4 Nf6 Nc3 a6'));
   assert.deepEqual(positionsUnderPrefix(book.root, ['h4', 'h5', 'h6']), []);
+});
+
+test('sanToPgn numbers White moves and is the inverse of pgnToSan', () => {
+  assert.equal(sanToPgn(['e4', 'c5', 'Nf3', 'd6', 'd4']), '1. e4 c5 2. Nf3 d6 3. d4');
+  assert.equal(sanToPgn([]), '');
+  const pgn = '1. e4 e5 2. Nf3 Nc6 3. Bb5 a6';
+  assert.equal(sanToPgn(pgnToSan(pgn)), pgn);
 });

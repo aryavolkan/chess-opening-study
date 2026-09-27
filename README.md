@@ -47,6 +47,15 @@ shallower result. Two things keep deepening it:
 The Analysis tab shows how much of the book is covered, the depth histogram
 and the deepener's progress, and exports everything as JSON.
 
+**Sharing, theme and preferences.** The address bar always holds the
+position on the board (`?moves=e4 c5 Nf3`), so a reload or a pasted link
+lands on the same position; the copy buttons under the board give you that
+link, the moves as PGN, or the position as FEN. The top bar has an
+Auto / Light / Dark switch (Auto follows the operating system), and the
+engine and book-arrow toggles and the tree depth are remembered by the
+browser. Keys: ← → step through the line, Home/End jump to either end, `f`
+flips the board.
+
 ## Running it
 
 Requires Node.js 22.5 or newer (for the built-in SQLite module).
@@ -87,6 +96,49 @@ Tests:
 npm test
 ```
 
+## Deploying
+
+The app is one Node process plus a SQLite file, so it needs a single machine
+with a persistent disk; it is not a static site. It has no authentication:
+anyone who can reach it can edit the study set and drive the server engine,
+so put it behind HTTPS and something like basic auth, a VPN or Tailscale if
+it is reachable from the internet.
+
+**Container image.** Every push to `main` runs the tests, builds the image,
+starts a container and checks that `/api/health`, the page and the engine
+WASM are served, then publishes it to GitHub Container Registry
+(`.github/workflows/publish.yml`):
+
+```
+ghcr.io/aryavolkan/chess-opening-study:latest      # also :sha-<commit>, :<version> on v* tags
+```
+
+Run it anywhere with Docker; analysis and the study set live in the
+`study-data` volume and survive upgrades:
+
+```sh
+docker compose up -d        # http://localhost:3000
+```
+
+`docker compose up -d --build` builds from the checkout instead of pulling.
+The image binds to `0.0.0.0`, keeps the database at `/data/study.sqlite` and
+takes the same environment variables as above (`DEEPEN=1` to keep the server
+engine running, `STOCKFISH_FLAVOR=full` for the stronger nets). While the
+repository is private, pulling needs `docker login ghcr.io` with a token that
+has `read:packages`.
+
+**Fly.io.** `fly.toml` describes one always-on machine (so the deepener keeps
+running) with a 1 GB volume and a health check:
+
+```sh
+fly launch --copy-config --no-deploy
+fly volumes create study_data --size 1
+fly deploy
+```
+
+**Anything else.** Any host with Node 22.5+ or a container runtime and a
+persistent disk works: set `HOST=0.0.0.0` and point `DB_PATH` at the disk.
+
 ## How it fits together
 
 ```
@@ -100,6 +152,9 @@ server/engine.js       Stockfish in Node with analyse(fen, {depth, multipv})
 server/deepener.js     background queue that raises stored depth
 server/app.js          static files + JSON API
 public/                the page: board (chessground), engine worker, tree, drill
+public/theme.js        Auto / Light / Dark preference, applied before first paint
+public/prefs.js        per-browser preferences in localStorage
+Dockerfile             image used by docker-compose.yml, fly.toml and the publish workflow
 ```
 
 ### API

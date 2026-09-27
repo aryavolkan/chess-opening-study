@@ -1,0 +1,17 @@
+# docker compose up -d        -> http://localhost:3000
+# docker compose up -d --build to build from this checkout instead of pulling.
+services:
+  opening-study:
+    image: ghcr.io/aryavolkan/chess-opening-study:latest
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - study-data:/data
+    environment:
+      DEEPEN: "0"                  # "1" starts the server deepener on boot
+      STOCKFISH_FLAVOR: lite-single
+    restart: unless-stopped
+
+volumes:
+  study-data:

@@ -1,0 +1,12 @@
+.git
+.github
+.claude
+node_modules
+data/*.sqlite
+data/*.sqlite-*
+docs
+test
+*.md
+.DS_Store
+docker-compose.yml
+fly.toml

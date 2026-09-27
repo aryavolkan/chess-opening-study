@@ -26,6 +26,11 @@ export function pgnToSan(pgn) {
     .map((tok) => tok.replace(/^\d+\.+/, ''));
 }
 
+/** ["e4", "c5", "Nf3"] -> "1. e4 c5 2. Nf3" */
+export function sanToPgn(sans) {
+  return sans.map((san, i) => (i % 2 === 0 ? `${i / 2 + 1}. ${san}` : san)).join(' ');
+}
+
 /** Build the trie. Nodes are keyed by SAN move from their parent. */
 export function buildBook(openings) {
   const root = makeNode(null, null, 0);
