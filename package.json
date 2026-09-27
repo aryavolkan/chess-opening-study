@@ -1,0 +1,23 @@
+{
+  "name": "chess-opening-study",
+  "version": "0.1.0",
+  "description": "Web app for exploring chess openings, drilling selected variations and building an ever-deepening engine analysis of the opening book",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server/index.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch server/index.js",
+    "deepen": "node --disable-warning=ExperimentalWarning scripts/deepen.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js",
+    "fetch-openings": "node scripts/fetch-openings.js"
+  },
+  "dependencies": {
+    "@lichess-org/chessground": "^10.2.0",
+    "chess.js": "^1.4.0",
+    "stockfish": "^19.0.0"
+  },
+  "license": "GPL-3.0-or-later"
+}

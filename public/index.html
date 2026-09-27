@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Opening Study</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%232a78d6'/%3E%3Ctext x='16' y='23' font-size='20' text-anchor='middle' fill='white'%3E%E2%99%9E%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/vendor/chessground/assets/chessground.base.css">
+  <link rel="stylesheet" href="/vendor/chessground/assets/chessground.brown.css">
+  <link rel="stylesheet" href="/vendor/chessground/assets/chessground.cburnett.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Opening Study</h1>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="explore" role="tab">Explore</button>
+      <button class="tab" data-tab="study" role="tab">Study</button>
+      <button class="tab" data-tab="analysis" role="tab">Analysis</button>
+    </nav>
+    <div class="topbar-status" id="engine-status" title="Browser engine status">engine: loading…</div>
+  </header>
+
+  <main class="layout">
+    <!-- ================= left column ================= -->
+    <aside class="col col-left">
+      <section class="panel" id="panel-explore-list">
+        <div class="panel-head">
+          <input id="search" type="search" placeholder="Search openings (name, ECO, moves)…" autocomplete="off">
+        </div>
+        <div class="eco-map" id="eco-map" aria-label="ECO map"></div>
+        <div class="eco-legend">
+          <span>ECO map: colour = average stored analysis depth, blank = no openings. Click a cell to filter.</span>
+          <button class="link" id="eco-clear" hidden>clear filter</button>
+        </div>
+        <ol class="opening-list" id="opening-list"></ol>
+      </section>
+
+      <section class="panel" id="panel-study-list" hidden>
+        <div class="panel-head">
+          <h2>Study set</h2>
+          <div class="btn-row">
+            <button id="drill-due" class="btn primary">Drill due</button>
+            <button id="drill-all" class="btn">Drill all</button>
+          </div>
+        </div>
+        <p class="hint" id="study-empty">No lines yet. In Explore, open a variation and add it to the study set as White or Black.</p>
+        <ol class="study-list" id="study-list"></ol>
+      </section>
+
+      <section class="panel" id="panel-analysis-stats" hidden>
+        <div class="panel-head"><h2>Stored analysis</h2></div>
+        <div class="stat-row" id="stat-tiles"></div>
+        <figure class="chart" id="depth-histogram">
+          <figcaption>Stored positions by depth</figcaption>
+          <div class="hist" id="hist"></div>
+        </figure>
+      </section>
+    </aside>
+
+    <!-- ================= centre column ================= -->
+    <section class="col col-center">
+      <div class="board-wrap">
+        <div class="eval-bar" id="eval-bar" title="Evaluation (White's point of view)">
+          <div class="eval-bar-white" id="eval-bar-white"></div>
+          <span class="eval-bar-label" id="eval-bar-label">0.00</span>
+        </div>
+        <div class="board-box">
+          <div id="board" class="cg-wrap"></div>
+        </div>
+      </div>
+      <div class="position-head">
+        <div class="opening-name" id="opening-name">Starting position</div>
+        <div class="position-meta" id="position-meta"></div>
+      </div>
+      <div class="controls">
+        <button class="btn icon" id="nav-start" title="Start (Home)">⏮</button>
+        <button class="btn icon" id="nav-back" title="Back (←)">◀</button>
+        <button class="btn icon" id="nav-fwd" title="Forward (→)">▶</button>
+        <button class="btn icon" id="nav-end" title="End (End)">⏭</button>
+        <button class="btn icon" id="flip" title="Flip board (f)">⇅</button>
+        <label class="toggle"><input type="checkbox" id="engine-toggle" checked> engine</label>
+        <label class="toggle"><input type="checkbox" id="arrows-toggle" checked> book arrows</label>
+      </div>
+      <div class="moves" id="moves"></div>
+      <div class="drill-box" id="drill-box" hidden></div>
+    </section>
+
+    <!-- ================= right column ================= -->
+    <aside class="col col-right">
+      <section class="panel" id="panel-engine">
+        <div class="panel-head">
+          <h2>Engine</h2>
+          <span class="badge" id="stored-depth" title="Depth of the analysis stored on the server for this position">stored: –</span>
+        </div>
+        <div class="engine-lines" id="engine-lines"></div>
+        <div class="engine-foot" id="engine-foot"></div>
+      </section>
+
+      <section class="panel" id="panel-book">
+        <div class="panel-head">
+          <h2>Book moves</h2>
+          <span class="badge" id="book-count"></span>
+        </div>
+        <table class="book-moves" id="book-moves"></table>
+        <div class="btn-row">
+          <button class="btn" id="add-white" title="Add the line on the board to the study set, to be drilled as White">+ study as White</button>
+          <button class="btn" id="add-black" title="Add the line on the board to the study set, to be drilled as Black">+ study as Black</button>
+        </div>
+        <div class="btn-row">
+          <button class="btn" id="add-subtree" title="Add every variation below this position to the study set">+ all variations below…</button>
+          <button class="btn" id="deepen-here" title="Ask the server to deepen every book position below this one first">deepen from here</button>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-deepen" hidden>
+        <div class="panel-head">
+          <h2>Server deepening</h2>
+          <span class="badge" id="deepen-state">stopped</span>
+        </div>
+        <form id="deepen-form" class="form-grid">
+          <label>Target depth <input type="number" id="deepen-depth" min="1" max="60" value="20"></label>
+          <label>Lines (MultiPV) <input type="number" id="deepen-multipv" min="1" max="10" value="3"></label>
+          <label class="span2">Scope <span class="mono" id="deepen-scope">whole book</span>
+            <button type="button" class="link" id="deepen-scope-here">use position on board</button>
+            <button type="button" class="link" id="deepen-scope-all">whole book</button>
+          </label>
+          <div class="btn-row span2">
+            <button type="submit" class="btn primary" id="deepen-start">Start</button>
+            <button type="button" class="btn" id="deepen-stop">Stop</button>
+          </div>
+        </form>
+        <div class="deepen-progress" id="deepen-progress"></div>
+        <hr>
+        <label class="toggle"><input type="checkbox" id="contribute-toggle"> also deepen in this browser tab</label>
+        <div class="hint" id="contribute-status">A second engine worker pulls the shallowest positions from the server and pushes deeper results back.</div>
+        <div class="btn-row">
+          <a class="btn" href="/api/analysis/export" download="opening-analysis.json">export analysis JSON</a>
+        </div>
+      </section>
+    </aside>
+
+    <!-- ================= tree ================= -->
+    <section class="tree-panel" id="tree-panel">
+      <div class="panel-head">
+        <h2>Variation tree</h2>
+        <div class="tree-controls">
+          <span id="tree-root-name" class="mono"></span>
+          <label class="toggle"><input type="checkbox" id="tree-pin"> pin root</label>
+          <label>depth <input type="number" id="tree-depth" min="1" max="12" value="4" style="width:3.5em"></label>
+          <button class="btn small" id="tree-up" title="Show the tree one move earlier">↑ parent</button>
+        </div>
+      </div>
+      <div class="tree-scroll"><svg id="tree" class="tree" role="img" aria-label="Variation tree"></svg></div>
+      <div class="tree-legend">
+        <span class="swatch" style="background:var(--eval-black)"></span> Black better
+        <span class="swatch" style="background:var(--eval-mid)"></span> equal
+        <span class="swatch" style="background:var(--eval-white)"></span> White better
+        <span class="sep"></span>
+        <span class="swatch ring none"></span> not analysed
+        <span class="swatch ring shallow"></span> depth &lt; 15
+        <span class="swatch ring deep"></span> depth ≥ 15
+        <span class="sep"></span> bold = named opening · click a node to go there · ⊕ expands
+      </div>
+      <div class="tooltip" id="tooltip" hidden></div>
+    </section>
+  </main>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
