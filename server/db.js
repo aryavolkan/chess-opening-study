@@ -733,8 +733,8 @@ export class Store {
 
   // ---- dedicated machines and deep-analysis requests --------------------
 
-  createMachine({ userId = LOCAL_USER_ID, backend, name, cpus, tokenHash }) {
-    const r = this.stmts.insertMachine.run(userId, backend, name, cpus, tokenHash, 'starting', new Date().toISOString());
+  createMachine({ userId = LOCAL_USER_ID, backend, name, cpus, tokenHash, createdAt = new Date().toISOString() }) {
+    const r = this.stmts.insertMachine.run(userId, backend, name, cpus, tokenHash, 'starting', createdAt);
     return this.getMachine(Number(r.lastInsertRowid));
   }
 
