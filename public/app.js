@@ -15,6 +15,7 @@ import { Drill } from '/study.js';
 import { initTheme } from '/theme.js';
 import { createPrefs } from '/prefs.js';
 import { createGamesPanel } from '/games.js';
+import { createExplorerPanel } from '/explorer.js';
 
 const MAX_BROWSER_DEPTH = 26;
 const MULTIPV = 3;
@@ -118,6 +119,17 @@ const games = createGamesPanel({
     openings: () => state.openings,
     currentEpd: () => epdOf(state.chess.fen()),
     currentCursor: () => state.cursor,
+  },
+});
+
+const explorerPanel = createExplorerPanel({
+  api,
+  prefs,
+  hooks: {
+    onSelectLine: (sans) => { if (!state.drillActive) setLine(sans); },
+    currentLine: () => state.line.slice(0, state.cursor),
+    flash,
+    refreshStudy: () => refreshStudy(),
   },
 });
 
@@ -968,11 +980,12 @@ function setTab(tab) {
   });
   $('panel-explore-list').hidden = tab !== 'explore';
   $('panel-study-list').hidden = tab !== 'study';
+  $('panel-explorer').hidden = tab !== 'study';
   $('panel-games').hidden = tab !== 'games';
   $('panel-analysis-stats').hidden = tab !== 'analysis';
   $('panel-deepen').hidden = tab !== 'analysis';
   $('panel-book').hidden = tab === 'analysis';
-  if (tab === 'study') refreshStudy();
+  if (tab === 'study') { refreshStudy(); explorerPanel.show(); } else explorerPanel.hide();
   if (tab === 'games') games.show(); else games.hide();
   if (tab === 'analysis') { refreshStats(); refreshDeepen(); }
 }

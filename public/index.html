@@ -59,6 +59,58 @@
         <ol class="study-list" id="study-list"></ol>
       </section>
 
+      <section class="panel" id="panel-explorer" hidden>
+        <div class="panel-head">
+          <h2>Opening explorer</h2>
+          <span class="badge" id="explore-state">stopped</span>
+        </div>
+        <p class="hint">Queue a search: engine workers walk every named opening in scope and score it for your colour: how sound it is, how many positions you would have to learn, how forgiving it is, and, with games imported, how often opponents let you reach it. Results come in as the workers go.</p>
+        <form id="explore-form" class="form-grid">
+          <label>Play as
+            <div class="seg" id="explore-color-seg" role="radiogroup" aria-label="Colour">
+              <button type="button" role="radio" aria-checked="true" data-color="white">White</button>
+              <button type="button" role="radio" aria-checked="false" data-color="black">Black</button>
+            </div>
+          </label>
+          <label>Workers <input type="number" id="explore-workers" min="1" max="16" value="2" title="Engine processes working in parallel"></label>
+          <label class="span2">Scope <span class="mono" id="explore-scope">whole book</span>
+            <button type="button" class="link" id="explore-scope-here">use position on board</button>
+            <button type="button" class="link" id="explore-scope-all">whole book</button>
+          </label>
+          <label>Depth <input type="number" id="explore-depth" min="6" max="30" value="14" title="Engine search depth per position"></label>
+          <label>Horizon (plies) <input type="number" id="explore-horizon" min="2" max="12" value="6" title="How far past the opening's position the lines are followed"></label>
+          <label>Replies per position <input type="number" id="explore-replies" min="1" max="5" value="3" title="How many opponent replies (within 60 cp of the best) must be answered"></label>
+          <label>Min games <input type="number" id="explore-min-games" min="0" value="0" title="Only openings reached by at least this many imported games"></label>
+          <div class="btn-row span2">
+            <button type="submit" class="btn primary" id="explore-queue">Queue</button>
+            <button type="button" class="btn" id="explore-start">Start workers</button>
+            <button type="button" class="btn" id="explore-stop">Stop</button>
+          </div>
+        </form>
+        <div class="deepen-progress" id="explore-progress"></div>
+        <ul class="job-list" id="explore-jobs"></ul>
+        <div class="panel-head">
+          <h2>Results</h2>
+          <div class="tree-controls">
+            <label>job <select id="explore-results-job"><option value="">all</option></select></label>
+            <label>sort <select id="explore-sort">
+              <option value="fit">fit</option>
+              <option value="decisions">least to learn</option>
+              <option value="eval">evaluation</option>
+              <option value="worst">worst case</option>
+              <option value="forgiveness">most forgiving</option>
+              <option value="reach">reach</option>
+              <option value="games">games</option>
+              <option value="theory">least theory</option>
+            </select></label>
+            <label class="toggle"><input type="checkbox" id="explore-sound" checked> sound only (eval ≥ −0.50)</label>
+          </div>
+        </div>
+        <p class="hint" id="explore-empty">No results yet. Queue a search and start the workers.</p>
+        <div class="table-scroll"><table class="explore-results" id="explore-results"></table></div>
+        <div class="btn-row"><button class="btn small" id="explore-more" hidden>show more</button></div>
+      </section>
+
       <section class="panel" id="panel-games" hidden>
         <div class="panel-head">
           <h2>Your games</h2>

@@ -61,4 +61,11 @@ export const api = {
   gamesOpenings: (by, filter, limit) => request('GET', `/api/games/openings?${qs({ by, limit, ...filter })}`),
   gamesList: (params) => request('GET', `/api/games?${qs(params)}`),
   game: (id) => request('GET', `/api/games/${id}`),
+
+  exploreStatus: () => request('GET', '/api/explore'),
+  exploreAdd: (job) => request('POST', '/api/explore/jobs', job),
+  exploreRemove: (id) => request('DELETE', `/api/explore/jobs/${id}`),
+  exploreStart: (opts) => request('POST', '/api/explore/start', opts || {}),
+  exploreStop: () => request('POST', '/api/explore/stop'),
+  exploreResults: (jobId) => request('GET', `/api/explore/results?${qs({ job: jobId })}`),
 };

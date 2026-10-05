@@ -44,7 +44,7 @@ function vendorRoots() {
 
 const MAX_BODY = 2 * 1024 * 1024;
 
-export function createApp({ store, book, deepener, importer = new Importer({ store, book }), log = () => {} }) {
+export function createApp({ store, book, deepener, explorer = null, importer = new Importer({ store, book }), log = () => {} }) {
   const vendors = vendorRoots();
   const openingsPayload = JSON.stringify({
     count: book.openings.length,
@@ -201,6 +201,17 @@ export function createApp({ store, book, deepener, importer = new Importer({ sto
       return { game };
     }],
 
+    // ---- opening explorer ----
+    ['GET', /^\/api\/explore$/, () => needExplorer().status()],
+    ['POST', /^\/api\/explore\/jobs$/, (req) => ({ job: needExplorer().addJob(req.body || {}), status: needExplorer().status() })],
+    ['DELETE', /^\/api\/explore\/jobs\/(\d+)$/, (req, res, m) => needExplorer().removeJob(Number(m[1]))],
+    ['POST', /^\/api\/explore\/start$/, async (req) => needExplorer().start(req.body || {})],
+    ['POST', /^\/api\/explore\/stop$/, async () => needExplorer().stop()],
+    ['GET', /^\/api\/explore\/results$/, (req) => {
+      const jobId = req.query.has('job') ? Number(req.query.get('job')) : undefined;
+      return { results: store.exploreResults({ jobId, limit: req.query.get('limit') || 5000 }) };
+    }],
+
     ['GET', /^\/api\/study$/, () => ({ lines: store.listStudyLines(), now: new Date().toISOString() })],
     ['POST', /^\/api\/study$/, (req) => {
       const b = req.body || {};
@@ -213,6 +224,11 @@ export function createApp({ store, book, deepener, importer = new Importer({ sto
       return { line };
     }],
   ];
+
+  function needExplorer() {
+    if (!explorer) throw httpError(503, 'the opening explorer is not available');
+    return explorer;
+  }
 
   return async function handle(req, res) {
     const url = new URL(req.url, 'http://localhost');

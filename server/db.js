@@ -88,6 +88,36 @@ CREATE TABLE IF NOT EXISTS games (
 CREATE INDEX IF NOT EXISTS games_import ON games(import_id);
 CREATE INDEX IF NOT EXISTS games_book_name ON games(book_name);
 
+-- Opening explorer: queued jobs and one result row per opening scored.
+CREATE TABLE IF NOT EXISTS explore_jobs (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT NOT NULL,
+  color       TEXT NOT NULL,
+  scope       TEXT NOT NULL,
+  params      TEXT NOT NULL,
+  status      TEXT NOT NULL DEFAULT 'queued',
+  total       INTEGER NOT NULL DEFAULT 0,
+  done        INTEGER NOT NULL DEFAULT 0,
+  error       TEXT,
+  created_at  TEXT NOT NULL,
+  started_at  TEXT,
+  finished_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS explore_results (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id      INTEGER NOT NULL,
+  path        TEXT NOT NULL,
+  ply         INTEGER NOT NULL,
+  eco         TEXT,
+  name        TEXT,
+  color       TEXT NOT NULL,
+  fit         INTEGER NOT NULL,
+  metrics     TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  UNIQUE(job_id, path)
+);
+
 CREATE TABLE IF NOT EXISTS game_positions (
   hash     INTEGER NOT NULL,
   game_id  INTEGER NOT NULL,
@@ -157,6 +187,18 @@ export class Store {
       insertPosition: db.prepare('INSERT OR IGNORE INTO game_positions (hash, game_id, ply, move) VALUES (?, ?, ?, ?)'),
       getGame: db.prepare('SELECT * FROM games WHERE id = ?'),
       hasGameKey: db.prepare('SELECT 1 FROM games WHERE key = ?'),
+
+      insertExploreJob: db.prepare('INSERT INTO explore_jobs (name, color, scope, params, total, created_at) VALUES (?, ?, ?, ?, ?, ?)'),
+      listExploreJobs: db.prepare('SELECT * FROM explore_jobs ORDER BY id'),
+      getExploreJob: db.prepare('SELECT * FROM explore_jobs WHERE id = ?'),
+      nextExploreJob: db.prepare("SELECT * FROM explore_jobs WHERE status IN ('queued', 'running') ORDER BY id LIMIT 1"),
+      deleteExploreJob: db.prepare('DELETE FROM explore_jobs WHERE id = ?'),
+      deleteExploreResults: db.prepare('DELETE FROM explore_results WHERE job_id = ?'),
+      upsertExploreResult: db.prepare(`INSERT INTO explore_results (job_id, path, ply, eco, name, color, fit, metrics, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(job_id, path) DO UPDATE SET fit = excluded.fit, metrics = excluded.metrics, created_at = excluded.created_at`),
+      exploreResultPaths: db.prepare('SELECT path FROM explore_results WHERE job_id = ?'),
+      exploreResults: db.prepare('SELECT * FROM explore_results WHERE job_id = ? ORDER BY fit DESC, ply, id LIMIT ?'),
+      allExploreResults: db.prepare('SELECT * FROM explore_results ORDER BY fit DESC, ply, id LIMIT ?'),
     };
   }
 
@@ -462,9 +504,69 @@ export class Store {
       })),
     };
   }
+
+  // ---- opening explorer -----------------------------------------------
+
+  createExploreJob({ name, color, scope, params, total = 0 }) {
+    const r = this.stmts.insertExploreJob.run(name, color, JSON.stringify(scope), JSON.stringify(params), total, new Date().toISOString());
+    return this.getExploreJob(Number(r.lastInsertRowid));
+  }
+
+  getExploreJob(id) {
+    const row = this.stmts.getExploreJob.get(id);
+    return row ? rowToExploreJob(row) : null;
+  }
+
+  listExploreJobs() {
+    return this.stmts.listExploreJobs.all().map(rowToExploreJob);
+  }
+
+  /** The oldest job that is queued or was interrupted while running. */
+  nextExploreJob() {
+    const row = this.stmts.nextExploreJob.get();
+    return row ? rowToExploreJob(row) : null;
+  }
+
+  updateExploreJob(id, fields) {
+    const sets = [];
+    const params = { $id: id };
+    if (fields.status !== undefined) { sets.push('status = $status'); params.$status = fields.status; }
+    if (fields.total !== undefined) { sets.push('total = $total'); params.$total = fields.total; }
+    if (fields.done !== undefined) { sets.push('done = $done'); params.$done = fields.done; }
+    if (fields.error !== undefined) { sets.push('error = $error'); params.$error = fields.error; }
+    if (fields.startedAt) sets.push("started_at = COALESCE(started_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))");
+    if (fields.finishedAt) sets.push("finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')");
+    if (!sets.length) return this.getExploreJob(id);
+    this.prepared(`UPDATE explore_jobs SET ${sets.join(', ')} WHERE id = $id`).run(params);
+    return this.getExploreJob(id);
+  }
+
+  deleteExploreJob(id) {
+    return this.transaction(() => {
+      const results = this.stmts.deleteExploreResults.run(id).changes;
+      const removed = this.stmts.deleteExploreJob.run(id).changes > 0;
+      return { removed, results };
+    });
+  }
+
+  saveExploreResult(jobId, { path, ply, eco, name, color, metrics }) {
+    this.stmts.upsertExploreResult.run(jobId, path.join(' '), ply, eco ?? null, name ?? null, color, metrics.fit ?? 0, JSON.stringify(metrics), new Date().toISOString());
+  }
+
+  exploreResultPaths(jobId) {
+    return this.stmts.exploreResultPaths.all(jobId).map((r) => r.path);
+  }
+
+  /** Results of one job (or of every job), best fit first. */
+  exploreResults({ jobId, limit = 5000 } = {}) {
+    const n = Math.max(1, Math.min(20000, Number(limit) || 5000));
+    const rows = jobId ? this.stmts.exploreResults.all(jobId, n) : this.stmts.allExploreResults.all(n);
+    return rows.map(rowToExploreResult);
+  }
 }
 
 /** WHERE clauses for the player / colour / import filters; adds their params. */
+// (explorer methods are on the Store above)
 function gameFilter(filter, params) {
   const where = [];
   if (filter.player) {
@@ -582,4 +684,36 @@ function rowToGameSummary(row) {
 
 function rowToGame(row) {
   return { ...rowToGameSummary(row), moves: row.moves ? row.moves.split(' ') : [] };
+}
+
+function rowToExploreJob(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    color: row.color,
+    scope: JSON.parse(row.scope),
+    params: JSON.parse(row.params),
+    status: row.status,
+    total: row.total,
+    done: row.done,
+    error: row.error,
+    createdAt: row.created_at,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+  };
+}
+
+function rowToExploreResult(row) {
+  return {
+    id: row.id,
+    jobId: row.job_id,
+    path: row.path.split(' '),
+    ply: row.ply,
+    eco: row.eco,
+    name: row.name,
+    color: row.color,
+    fit: row.fit,
+    ...JSON.parse(row.metrics),
+    createdAt: row.created_at,
+  };
 }

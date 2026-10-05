@@ -65,6 +65,25 @@ its games and its opening name. Games are deduplicated across imports, and
 each import can be removed again. Positions are indexed for the first 20
 moves (configurable); the full game is kept so it can be put on the board.
 
+**Opening explorer.** On the Study tab, queue a search for openings worth
+playing: pick a colour, a scope (the whole book or everything under the
+position on the board), how many engine workers to run, and the explorer
+walks every named opening in scope with a pool of Stockfish processes.
+For each one it builds the small repertoire you would actually need: where
+it is your move, the engine's best move is the one to learn; where it is the
+opponent's move, every reply the engine rates close to best, plus replies
+that are common in your imported games, has to be answered. The result table
+shows, for each opening, the evaluation and the worst case at the end of
+those lines, how many positions you would have to learn, how many distinct
+moves that is (system openings repeat the same moves against everything),
+how forgiving the positions are (the cost of playing your second-best move),
+how much theory the book has below it, how often opponents in your games let
+you reach it, and a single 0 to 100 "fit" for "sound and little to learn".
+Sort by any of these, click a row to put the line on the board, or add it to
+the study set in one click. Jobs run in the background, survive a restart,
+can be stopped and resumed, and everything they analyse is stored, so the
+rest of the app gets deeper analysis for free.
+
 **Sharing, theme and preferences.** The address bar always holds the
 position on the board (`?moves=e4 c5 Nf3`), so a reload or a pasted link
 lands on the same position; the copy buttons under the board give you that
@@ -94,6 +113,8 @@ Environment variables:
 | `DEEPEN` | unset | `1` starts the server deepener on boot |
 | `STOCKFISH_FLAVOR` | `lite-single` | Server engine build: `lite-single`, `lite`, `single`, `full` (the full nets are 94 MB and stronger) |
 | `LOG_DEEPEN` | unset | `1` logs every position the deepener finishes |
+| `EXPLORE` | unset | `1` starts the opening explorer's queued jobs on boot (they also resume by themselves if they were running) |
+| `LOG_EXPLORE` | unset | `1` logs every opening the explorer scores |
 
 Headless deepening without the web server, for example on a machine that is
 left running overnight (it shares the database with the server):
@@ -193,9 +214,12 @@ server/games.js        PGN import: replay with chessops, classify by book positi
 scripts/import-pgn.js  the same import from the command line
 server/engine.js       Stockfish in Node with analyse(fen, {depth, multipv})
 server/deepener.js     background queue that raises stored depth
+server/engine-pool.js  pool of engine worker processes (engine-worker.js) with a request queue
+server/explorer.js     opening explorer: job queue, repertoire walk, scoring
 server/app.js          static files + JSON API
 public/                the page: board (chessground), engine worker, tree, drill
 public/games.js        Games tab: import, opening chart, ECO frequency map, game list
+public/explorer.js     Study tab: explorer jobs, workers and the results table
 public/theme.js        Auto / Light / Dark preference, applied before first paint
 public/prefs.js        per-browser preferences in localStorage
 Dockerfile             image used by docker-compose.yml, fly.toml and the publish workflow
@@ -221,10 +245,26 @@ Dockerfile             image used by docker-compose.yml, fly.toml and the publis
 | GET | `/api/games/openings?by=opening\|family\|eco` | games grouped by opening, with results |
 | GET | `/api/games?epd=&name=&family=&eco=&player=&color=` | games, most recent first (`atPly` with `epd`) |
 | GET | `/api/games/:id` | one game with its moves |
+| GET | `/api/explore` | explorer status: workers, current opening, jobs with progress |
+| POST/DELETE | `/api/explore/jobs`, `/api/explore/jobs/:id` | queue `{color, scope[], depth, horizon, replies, minGames}`; remove a job and its results |
+| POST | `/api/explore/start`, `/api/explore/stop` | start the worker pool (`{workers}`) or stop it; interrupted jobs resume where they were |
+| GET | `/api/explore/results?job=` | scored openings, best fit first |
 
 Game queries take `player=` (a name as it appears in the PGN, case-insensitive)
 and `color=white|black`; results then come with `wins` and `losses` from that
 player's point of view in addition to `white`, `draws` and `black`.
+
+Explorer results carry, per opening: `eval` and `worst` (centipawns, your
+point of view), `decisions` (positions to learn), `moves` (distinct moves of
+yours), `forgiveness` (average centipawns lost by your second-best move),
+`theory` (book nodes below), `reach` and `reachSamples` (from the imported
+games, when any), and `fit`. Fit starts at 100 and loses up to 50 for a bad
+evaluation (half a point per centipawn below zero, the worst case at half
+weight), 4 per position to learn beyond the first, and up to 20 for
+unforgiving positions (1 per 5 centipawns); a known reach then scales it
+towards its square root. The engine workers are separate Node processes (the
+WASM engine only initialises on a main thread), one Stockfish each, so set
+the worker count to the cores you can spare.
 
 Positions are keyed by EPD (the first four FEN fields). Scores are stored as
 the engine reports them, from the side to move's point of view; the UI

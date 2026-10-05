@@ -221,3 +221,8 @@ test('games: import a PGN body, query positions and openings, fetch and delete',
   assert.deepEqual(body, { removed: true, games: 2 });
   assert.equal((await (await get('/api/games/imports')).json()).total.games, 2);
 });
+
+test('explore endpoints proxy to the explorer', async () => {
+  let r = await get('/api/explore');
+  assert.equal(r.status, 503, 'no explorer wired in this test server');
+});

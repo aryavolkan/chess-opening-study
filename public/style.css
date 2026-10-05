@@ -308,6 +308,29 @@ input[type=search], input[type=number] {
 .book-moves tr.offbook .name { font-style: italic; }
 .book-moves tr.offbook td:first-child { opacity: .85; }
 
+/* ---- opening explorer ---- */
+.job-list { list-style: none; margin: 8px 0; padding: 0; font-size: 12px; }
+.job-list li { display: grid; grid-template-columns: 1fr auto auto; gap: 2px 8px; padding: 4px 0; border-bottom: 1px solid var(--border); align-items: center; }
+.job-list .job-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-list .job-meta { grid-column: 1 / -1; color: var(--text-3); }
+.job-list .job-meta .progress { margin: 3px 0 0; }
+.job-list .status { font-size: 11px; }
+.job-list .status.running { color: var(--accent-2); font-weight: 600; }
+.job-list .status.done { color: var(--good); }
+.table-scroll { overflow-x: auto; max-width: 100%; }
+.explore-results { width: 100%; border-collapse: collapse; font-size: 12px; }
+.explore-results th { text-align: right; font-weight: 600; color: var(--text-3); font-size: 10px; text-transform: uppercase; letter-spacing: .03em; padding: 3px 4px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.explore-results th:first-child, .explore-results td:first-child { text-align: left; }
+.explore-results td { padding: 3px 4px; border-bottom: 1px solid var(--border); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.explore-results tr { cursor: pointer; }
+.explore-results tbody tr:hover { background: var(--surface-2); }
+.explore-results .name { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.explore-results .name .eco { color: var(--text-3); font-family: ui-monospace, monospace; font-size: 11px; margin-right: 4px; }
+.explore-results .bad { color: var(--bad); }
+.explore-results .act .link { padding: 0 2px; }
+.fitbar { display: inline-block; width: 44px; height: 8px; border-radius: 0 3px 3px 0; background: var(--freq-1); vertical-align: middle; margin-right: 5px; overflow: hidden; }
+.fitbar > i { display: block; height: 100%; background: var(--accent); border-radius: 0 3px 3px 0; }
+
 /* ---- tree ---- */
 .tree-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; position: relative; }
 .tree-controls { display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--text-2); flex-wrap: wrap; }
