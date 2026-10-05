@@ -28,6 +28,7 @@ const NS = 'http://www.w3.org/2000/svg';
  */
 export function renderTree(svg, o) {
   const { root, depth, expanded, analysis } = o;
+  const workers = o.workers || [];
   const rows = [];
   const visible = new Map(); // node -> { row, col }
 
@@ -145,7 +146,44 @@ export function renderTree(svg, o) {
     g.addEventListener('mouseleave', (e) => o.onHover(e, null));
     svg.appendChild(g);
   }
+
+  // Worker dots: shared CPUs currently analysing positions in the visible tree.
+  const byEpd = new Map();
+  for (const w of workers) {
+    if (!w.epd) continue;
+    const list = byEpd.get(w.epd) || (byEpd.set(w.epd, []), byEpd.get(w.epd));
+    list.push(w);
+  }
+  for (const [node, pos] of visible) {
+    const list = byEpd.get(node.epd);
+    if (!list || !list.length) continue;
+    const cx = x(pos.col);
+    const cy = y(pos.row);
+    const orbit = R + 6;
+    list.forEach((w, i) => {
+      const angle = (2 * Math.PI * i) / Math.max(list.length, 1) - Math.PI / 2;
+      const wx = cx + orbit * Math.cos(angle);
+      const wy = cy + orbit * Math.sin(angle);
+      const dot = el('circle', {
+        class: `worker source-${w.source}`,
+        r: 3,
+        cx: wx.toFixed(1),
+        cy: wy.toFixed(1),
+        'data-source': w.source,
+      });
+      const label = workerLabel(w);
+      dot.appendChild(el('title', {})).textContent = label;
+      svg.appendChild(dot);
+    });
+  }
+
   return { nodes: visible.size };
+}
+
+function workerLabel(w) {
+  const src = { deepener: 'server deepener', explorer: 'opening explorer', machine: 'dedicated machine', browser: 'browser engine' }[w.source] || w.source;
+  const prog = w.progress ? ` · depth ${w.progress}` : '';
+  return `${src} analysing to depth ${w.depth}${prog}`;
 }
 
 function moveLabel(node) {

@@ -100,6 +100,14 @@ test('deepen endpoints proxy to the deepener', async () => {
   assert.equal(r.status, 400);
 });
 
+test('workers endpoint reports active engine workers', async () => {
+  let r = await get('/api/workers');
+  let body = await r.json();
+  assert.ok(Array.isArray(body.workers));
+  assert.ok(body.at);
+  assert.equal(body.workers.length, 0);
+});
+
 test('study endpoints', async () => {
   let r = await post('/api/study', { san: ['e4', 'c5'], color: 'black', name: 'Sicilian Defense', eco: 'B20' });
   const { line } = await r.json();

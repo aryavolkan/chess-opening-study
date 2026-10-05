@@ -218,7 +218,7 @@ export class Deepener extends EventEmitter {
       // The browser may have deepened this one in the meantime.
       const existing = this.store.getAnalysis(item.epd);
       if (existing && existing.depth >= this.targetDepth && existing.multipv >= this.multipv) continue;
-      this.current = { epd: item.epd, depth: existing?.depth ?? 0, startedAt: Date.now() };
+      this.current = { epd: item.epd, depth: existing?.depth ?? 0, targetDepth: this.targetDepth, startedAt: Date.now() };
       const result = await this.engine.analyse(fenFromEpd(item.epd), { depth: this.targetDepth, multipv: this.multipv });
       this.analysed++;
       if (result.lines.length) {

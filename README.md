@@ -17,9 +17,11 @@ gets deeper the longer you run it.
 name, ECO code or moves, or click a cell in the ECO map. On the board every
 book continuation is drawn as an arrow, listed with its stored engine
 evaluation, and the variation tree below the board shows the lines that
-branch out from the current position, coloured by evaluation. Click any node
-to jump there; play any move on the board to leave the book and analyse on
-your own.
+branch out from the current position, coloured by evaluation. When any
+server or browser engine is analysing a book position, a small pulsing dot
+appears on that node so you can watch the shared CPU pool work. Click any
+node to jump there; play any move on the board to leave the book and analyse
+on your own.
 
 **Study.** Add any line to the study set, to be played as White or as Black.
 Drill mode plays the opponent's moves and waits for yours; one wrong move

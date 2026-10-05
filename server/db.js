@@ -337,6 +337,7 @@ export class Store {
       getRequest: db.prepare('SELECT * FROM deep_requests WHERE id = ?'),
       pendingRequest: db.prepare("SELECT * FROM deep_requests WHERE user_id = ? AND epd = ? AND status IN ('queued', 'running') LIMIT 1"),
       listRequestsOf: db.prepare("SELECT * FROM deep_requests WHERE user_id IN (?, ?) AND (status IN ('queued', 'running') OR finished_at > ?) ORDER BY id DESC LIMIT 100"),
+      listRequestsRunning: db.prepare("SELECT * FROM deep_requests WHERE status = 'running' ORDER BY id"),
       nextRequest: db.prepare("SELECT * FROM deep_requests WHERE user_id = ? AND status = 'queued' ORDER BY id LIMIT 1"),
       requeueOfMachine: db.prepare("UPDATE deep_requests SET status = 'queued', machine_id = NULL, started_at = NULL WHERE machine_id = ? AND status = 'running'"),
 
@@ -794,6 +795,11 @@ export class Store {
       return this.prepared(`SELECT * FROM deep_requests WHERE status IN ('queued', 'running') OR finished_at > $since ORDER BY id DESC LIMIT 100`).all({ $since: since }).map(rowToRequest);
     }
     return this.stmts.listRequestsOf.all(o[0], o[1] ?? o[0], since).map(rowToRequest);
+  }
+
+  /** Every request currently being analysed, for the shared worker visualization. */
+  listAllRequests() {
+    return this.stmts.listRequestsRunning.all().map(rowToRequest);
   }
 
   /** Hand the user's oldest queued request to a machine. */

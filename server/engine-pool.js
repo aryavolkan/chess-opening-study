@@ -162,6 +162,7 @@ export class EnginePool {
       queued: this.queue.length,
       completed: this.completed,
       engine: this.name,
+      working: this.workers.filter((w) => w.current).map((w) => ({ fen: w.current.fen, depth: w.current.depth, multipv: w.current.multipv })),
     };
   }
 }

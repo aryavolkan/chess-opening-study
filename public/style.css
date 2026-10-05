@@ -377,6 +377,15 @@ input[type=search], input[type=number] {
 .tree .node text.name { fill: var(--text-3); font-size: 10px; }
 .tree .node text.more { fill: var(--accent); font-size: 11px; font-weight: 700; }
 .tree .node:hover circle { stroke: var(--accent); }
+.tree .worker { pointer-events: none; animation: worker-pulse 1.2s ease-in-out infinite; }
+.tree .worker.source-deepener { fill: var(--accent); }
+.tree .worker.source-explorer { fill: var(--good); }
+.tree .worker.source-machine { fill: var(--accent-2); }
+.tree .worker.source-browser { fill: var(--warn); }
+@keyframes worker-pulse {
+  0%, 100% { opacity: .85; r: 3; }
+  50% { opacity: 1; r: 4; }
+}
 .tree-legend { font-size: 11px; color: var(--text-3); margin-top: 6px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; }
 .swatch.ring { background: var(--surface); border: 1.5px solid var(--text-3); }

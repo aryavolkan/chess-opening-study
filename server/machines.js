@@ -99,6 +99,22 @@ export class Machines extends EventEmitter {
     return { ...r, live: live ? { depth: live.depth, score: live.lines[0]?.score ?? null, pv: live.lines[0]?.pv?.slice(0, 8) ?? [], at: live.at } : null };
   }
 
+  /** Currently running analysis jobs, with live progress, for the worker-dot visualization. */
+  workers() {
+    const out = [];
+    for (const r of this.store.listAllRequests()) {
+      if (r.status !== 'running') continue;
+      const live = this.live.get(r.id);
+      out.push({
+        source: 'machine',
+        epd: r.epd,
+        depth: r.depth,
+        progress: live ? live.depth : (r.progress || 0),
+      });
+    }
+    return out;
+  }
+
   /** Start a machine for the user. */
   async create(user, { cpus } = {}) {
     if (!this.enabled) throw httpError(503, 'dedicated machines are not available on this server');

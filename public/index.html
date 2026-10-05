@@ -27,7 +27,7 @@
       <div class="account" id="account" hidden>
         <a class="btn small primary" id="sign-in" href="/auth/google">Sign in with Google</a>
         <span class="account-user" id="account-user" hidden>
-          <img id="account-avatar" alt="" width="20" height="20" referrerpolicy="no-referrer" hidden>
+          <img id="account-avatar" alt="" width="20" height="20" referrerpolicy="no-referrer" crossorigin="anonymous" hidden>
           <span id="account-name"></span>
           <span class="badge" id="account-admin" hidden>admin</span>
           <button class="link" id="sign-out">sign out</button>
@@ -312,6 +312,11 @@
         <span class="swatch ring none"></span> not analysed
         <span class="swatch ring shallow"></span> depth &lt; 15
         <span class="swatch ring deep"></span> depth ≥ 15
+        <span class="sep"></span>
+        <span class="swatch" style="background:var(--accent)"></span> deepener
+        <span class="swatch" style="background:var(--good)"></span> explorer
+        <span class="swatch" style="background:var(--accent-2)"></span> machine
+        <span class="swatch" style="background:var(--warn)"></span> browser
         <span class="sep"></span> bold = named opening · click a node to go there · ⊕ expands
         <span class="sep"></span><span id="tree-games-legend" hidden>edge width = share of your games · number = games through the node</span>
       </div>

@@ -51,12 +51,14 @@ const state = {
   deepen: null,
   contribute: false,
   contributeCount: 0,
+  helperEpd: null,
   games: new Map(),       // epd -> imported-game counts for the active perspective (null when none)
   gamesMoves: new Map(),  // epd -> { stats, moves } played from there in the imported games
   gamesFilter: {},        // player / colour perspective, owned by the Games panel
   gamesTotal: 0,
   gamesPlies: 0,
   auth: { mode: 'off', user: null, admin: true }, // replaced by /auth/me at start-up
+  workers: [], // {source, epd, depth, progress?} currently analysing positions
 };
 
 const board = createBoard($('board'), { onMove: onBoardMove });
@@ -758,6 +760,34 @@ function scheduleTree() {
   if (!state.drillActive) treeTimer = setTimeout(renderTreeNow, 30);
 }
 
+function allWorkers() {
+  const list = state.workers.slice();
+  if (state.liveEpd && state.engineOn && !state.drillActive) {
+    list.push({ source: 'browser', epd: state.liveEpd, depth: MAX_BROWSER_DEPTH, progress: state.live?.depth });
+  }
+  if (state.helperEpd && state.contribute) {
+    list.push({ source: 'browser', epd: state.helperEpd, depth: Number($('deepen-depth').value) || 20, progress: null });
+  }
+  return list;
+}
+
+function workersKey(list) {
+  return list.map((w) => `${w.source}:${w.epd}:${w.depth}:${w.progress ?? ''}`).sort().join('|');
+}
+
+async function refreshWorkers() {
+  try {
+    const { workers } = await api.workers();
+    const next = workers || [];
+    const changed = workersKey(next) !== workersKey(state.workers);
+    state.workers = next;
+    if (changed) renderTreeNow();
+  } catch (err) {
+    // Ignore on local/offline setups; the endpoint is informational.
+    if (err.status !== 404) console.error(err);
+  }
+}
+
 function renderTreeNow() {
   const root = treeRoot();
   annotate(root);
@@ -777,6 +807,7 @@ function renderTreeNow() {
     depth: state.treeDepth,
     expanded: state.treeExpanded,
     analysis: state.analysis,
+    workers: allWorkers(),
     games: state.gamesTotal ? state.games : null,
     onSelect: (node) => { if (!state.drillActive) setLine(pathOf(node)); },
     onToggle: (node) => {
@@ -1034,7 +1065,9 @@ async function contributeLoop() {
     for (const p of batch.positions) {
       if (!state.contribute) break;
       $('contribute-status').textContent = `Analysing ${p.epd} (stored depth ${p.depth}) to depth ${batch.targetDepth}… ${state.contributeCount} done in this tab.`;
+      state.helperEpd = p.epd;
       const r = await helper.analyse(fenFromEpd(p.epd), { depth: batch.targetDepth, multipv: MULTIPV });
+      if (state.helperEpd === p.epd) state.helperEpd = null;
       if (r.stopped || !r.lines.length) continue;
       try {
         const res = await api.saveAnalysis({ epd: p.epd, depth: r.depth, lines: r.lines, nodes: r.nodes, engine: helper.name });
@@ -1215,6 +1248,7 @@ function bind() {
   syncSeg();
   setInterval(() => { if (state.tab === 'analysis') { refreshDeepen(); } }, 3000);
   setInterval(() => { if (state.tab === 'analysis') refreshStats(); }, 15000);
+  setInterval(refreshWorkers, 3000);
 }
 
 async function main() {
@@ -1232,6 +1266,7 @@ async function main() {
   refreshEco();
   refreshStudy();
   refreshDeepen();
+  refreshWorkers();
   startEngine();
   games.refreshImports().then(() => {
     syncGamesTotal();

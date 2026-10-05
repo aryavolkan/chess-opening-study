@@ -162,6 +162,20 @@ export function createApp({ store, book, deepener, explorer = null, machines = n
       return { queued: deepener.prioritize(epds.map(String)), status: deepener.status() };
     }, ADMIN],
 
+    ['GET', /^\/api\/workers$/, () => {
+      const workers = [];
+      const d = deepener.status();
+      if (d.running && d.current) workers.push({ source: 'deepener', epd: d.current.epd, depth: d.current.targetDepth ?? d.targetDepth });
+      const e = explorer?.status();
+      if (e?.running && e.pool?.working) {
+        for (const w of e.pool.working) workers.push({ source: 'explorer', epd: epdOf(w.fen), depth: w.depth });
+      }
+      if (machines?.enabled) {
+        for (const w of machines.workers()) workers.push({ source: w.source, epd: w.epd, depth: w.depth, progress: w.progress });
+      }
+      return { workers, at: new Date().toISOString() };
+    }, PUBLIC],
+
     // ---- imported games ----
     ['GET', /^\/api\/games\/imports$/, (req) => ({
       imports: store.listImports(req.scope),

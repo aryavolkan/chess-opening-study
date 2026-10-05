@@ -79,6 +79,7 @@ export const api = {
   machinesRequest: (body) => request('POST', '/api/machines/requests', body),
   machinesCancel: (id) => request('DELETE', `/api/machines/requests/${id}`),
   exploreStatus: () => request('GET', '/api/explore'),
+  workers: () => request('GET', '/api/workers'),
   exploreAdd: (job) => request('POST', '/api/explore/jobs', job),
   exploreRemove: (id) => request('DELETE', `/api/explore/jobs/${id}`),
   exploreStart: (opts) => request('POST', '/api/explore/start', opts || {}),
