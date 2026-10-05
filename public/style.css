@@ -259,6 +259,8 @@ input[type=search], input[type=number] {
 .filter-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--text-2); margin: 10px 0; }
 .filter-row select { font: inherit; font-size: 12px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
 .stat-tile .v { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stat-row .stat-tile.wide { grid-column: 1 / -1; }
+.stat-row .stat-tile.wide .v { font-size: 16px; }
 
 /* ---- games: opening chart (horizontal bars, stacked by result) ---- */
 .legend { font-size: 11px; color: var(--text-3); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 2px 0 6px; }
@@ -271,7 +273,7 @@ input[type=search], input[type=number] {
 .persp .swatch.b, .persp .seg.b { background: var(--bad); }
 .opening-bars { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
 .obar {
-  display: grid; grid-template-columns: minmax(120px, 42%) 1fr 3.2em 3em; gap: 8px; align-items: center;
+  display: grid; grid-template-columns: minmax(110px, 40%) 1fr 5.6em 3em; gap: 8px; align-items: center;
   font: inherit; font-size: 12px; color: var(--text); background: none; border: 0; border-radius: 5px; padding: 3px 4px; cursor: pointer; text-align: left; width: 100%;
 }
 .obar:hover, .obar:focus-visible { background: var(--surface-2); }
@@ -280,7 +282,9 @@ input[type=search], input[type=number] {
 .obar-track { display: flex; gap: 2px; height: 10px; border-radius: 0 4px 4px 0; overflow: hidden; min-width: 4px; }
 .obar-track .seg { display: block; min-width: 2px; }
 .obar-track .seg:last-child { border-radius: 0 4px 4px 0; }
-.obar-n { text-align: right; font-variant-numeric: tabular-nums; }
+.obar-n { text-align: right; font-variant-numeric: tabular-nums; display: inline-flex; align-items: center; justify-content: flex-end; gap: 5px; }
+.obar-n .share { display: inline-block; width: 28px; height: 6px; background: var(--surface-2); border-radius: 0 3px 3px 0; overflow: hidden; }
+.obar-n .share > i { display: block; height: 100%; background: var(--freq-3); border-radius: 0 3px 3px 0; }
 .obar-score { text-align: right; color: var(--text-3); font-variant-numeric: tabular-nums; }
 
 /* ---- games: list ---- */

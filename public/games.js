@@ -234,9 +234,9 @@ export function createGamesPanel({ api, prefs, hooks }) {
       [fmt(t.games), persp ? `games of ${player()}${st.color ? ` as ${st.color}` : ''}` : 'games'],
       [t.games ? pct(score(t)) : '–', persp ? 'score' : "White's score"],
       [t.games ? pct(t.draws / t.games) : '–', 'draws'],
-      [top ? (top.name || 'not in the book') : '–', top ? `most played ${st.by === 'eco' ? 'ECO code' : st.by}` : ''],
     ];
-    $('games-tiles').innerHTML = tiles.map(([v, l]) => `<div class="stat-tile"><div class="v" title="${esc(String(v))}">${esc(String(v))}</div><div class="l">${esc(l)}</div></div>`).join('');
+    const topTile = top ? `<div class="stat-tile wide"><div class="v" title="${esc(top.name || '')}">${esc(top.name || 'not in the book')}</div><div class="l">most played ${st.by === 'eco' ? 'ECO code' : st.by} · ${fmt(top.games)} games, ${pct(top.games / t.games)}</div></div>` : '';
+    $('games-tiles').innerHTML = tiles.map(([v, l]) => `<div class="stat-tile"><div class="v" title="${esc(String(v))}">${esc(String(v))}</div><div class="l">${esc(l)}</div></div>`).join('') + topTile;
   }
 
   function renderLegend() {
@@ -258,9 +258,12 @@ export function createGamesPanel({ api, prefs, hooks }) {
       row.setAttribute('role', 'row');
       const name = g.name || 'not in the opening book';
       const label = st.by === 'eco' ? `${g.eco || '–'} <span class="eco">${esc(shorten(name, 34))}</span>` : `${esc(shorten(name, 44))}${g.eco ? ` <span class="eco">${esc(g.eco)}</span>` : ''}`;
+      // The split is the point of each row, so it gets the full width; the
+      // share of games is a separate mark (lengths differ a hundredfold in a
+      // long tail, which would squash every other row's split to a sliver).
       row.innerHTML = `<span class="obar-name" title="${esc(name)}">${label}</span>
-        <span class="obar-track" style="width:${Math.max(3, (100 * g.games) / max)}%">${segments(g)}</span>
-        <span class="obar-n">${fmt(g.games)}</span><span class="obar-score">${pct(score(g))}</span>`;
+        <span class="obar-track">${segments(g)}</span>
+        <span class="obar-n"><span class="share" title="${pct(g.games / st.summary.total.games)} of the games"><i style="width:${Math.max(2, (100 * g.games) / max)}%"></i></span>${fmt(g.games)}</span><span class="obar-score">${pct(score(g))}</span>`;
       row.onclick = () => selectGroup(g);
       const tip = (e) => hooks.showTooltip(tooltipHtml(name, g), e);
       row.addEventListener('mouseenter', tip);
