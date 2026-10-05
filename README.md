@@ -230,7 +230,21 @@ database from before sign-in is migrated in place: its study set, imports
 and games belong to the local user, which admins also own, so an admin can
 share the imports made before the site went public.
 
-**3. Deploy.** `fly.toml` describes one always-on machine with a 1 GB volume,
+**3. Deploy.** `scripts/fly-setup.sh` does the whole of this step the way
+[Fly's agent guide](https://fly.io/agent-ready.md) describes: it installs
+`flyctl` if needed, signs in (with `FLY_API_TOKEN` from the environment, or
+by printing a login URL to approve), creates the app from `fly.toml` if it
+does not exist, adds the volume, sets the secrets it finds in the
+environment (the Google variables, the machine limits) plus a deploy token
+for the analysis machines, deploys, and prints the URL. It refuses to
+deploy a public URL without the Google variables unless told `--open`.
+
+```sh
+export GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... ADMIN_EMAILS=you@example.com
+scripts/fly-setup.sh                 # or: --app other-name --region fra
+```
+
+By hand, `fly.toml` describes one always-on machine with a 1 GB volume,
 `HOST`, `PORT`, `DB_PATH` and `BASE_URL` set (change `BASE_URL` to your
 app's hostname or custom domain). `flyctl` is installed with
 `curl -L https://fly.io/install.sh | sh`; it authenticates with
@@ -313,6 +327,7 @@ server/openings.js     loads the book, computes the position of every node
 server/db.js           SQLite: analysis, study_lines, settings, imports, games, game_positions
 server/games.js        PGN import: replay with chessops, classify by book position, index positions
 scripts/import-pgn.js  the same import from the command line
+scripts/fly-setup.sh   create, configure and deploy the app on Fly.io
 server/engine.js       Stockfish in Node with analyse(fen, {depth, multipv})
 server/deepener.js     background queue that raises stored depth
 server/engine-pool.js  pool of engine worker processes (engine-worker.js) with a request queue
