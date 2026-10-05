@@ -15,6 +15,7 @@ import { nearestName } from '../shared/book.js';
 import { epdOf } from '../shared/fen.js';
 import { Importer } from './games.js';
 import { createAuth } from './auth.js';
+import { PublicWorkerPool } from './public-worker-pool.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(here, '..');
@@ -50,7 +51,7 @@ function vendorRoots() {
 
 const MAX_BODY = 2 * 1024 * 1024;
 
-export function createApp({ store, book, deepener, explorer = null, machines = null, importer = new Importer({ store, book }), auth = createAuth({ store }), log = () => {} }) {
+export function createApp({ store, book, deepener, explorer = null, machines = null, publicWorkers = null, importer = new Importer({ store, book }), auth = createAuth({ store }), log = () => {} }) {
   const vendors = vendorRoots();
   const openingsPayload = JSON.stringify({
     count: book.openings.length,
@@ -70,6 +71,7 @@ export function createApp({ store, book, deepener, explorer = null, machines = n
   const USER = { access: 'user' };
   const ADMIN = { access: 'admin' };
   const WORKER = { access: 'worker' }; // a dedicated machine, by its bearer token
+  const PUBLIC_WORKER = { access: 'public-worker' }; // a global contributor worker, by its bearer token
 
   const routes = [
     ['GET', /^\/api\/health$/, () => ({ ok: true, openings: book.openings.length, positions: uniqueBookEpds.size, signIn: auth.mode }), PUBLIC],
@@ -267,6 +269,23 @@ export function createApp({ store, book, deepener, explorer = null, machines = n
     ['POST', /^\/api\/machines\/worker\/result$/, (req) => needMachines().workerResult(req.machine, req.body || {}), WORKER],
     ['POST', /^\/api\/machines\/worker\/bye$/, (req) => needMachines().workerBye(req.machine), WORKER],
 
+    // ---- public contributor workers ----
+    ['GET', /^\/api\/public-workers$/, (req) => {
+      if (!publicWorkers) throw httpError(503, 'public workers are not enabled');
+      const s = publicWorkers.status();
+      s.apiUrl = `${req.headers['x-forwarded-proto'] || 'http'}://${req.headers.host}`;
+      return s;
+    }, PUBLIC],
+    ['POST', /^\/api\/public-workers\/join$/, (req) => {
+      if (!publicWorkers) throw httpError(503, 'public workers are not enabled');
+      const { token, name } = publicWorkers.join(req.body || {});
+      return { token, name, apiUrl: `${req.headers['x-forwarded-proto'] || 'http'}://${req.headers.host}` };
+    }, PUBLIC],
+    ['POST', /^\/api\/public-workers\/worker\/next$/, (req) => publicWorkers.next(req.publicWorker, req.body || {}), PUBLIC_WORKER],
+    ['POST', /^\/api\/public-workers\/worker\/progress$/, (req) => publicWorkers.progress(req.publicWorker, req.body || {}), PUBLIC_WORKER],
+    ['POST', /^\/api\/public-workers\/worker\/result$/, (req) => publicWorkers.result(req.publicWorker, req.body || {}), PUBLIC_WORKER],
+    ['POST', /^\/api\/public-workers\/worker\/bye$/, (req) => publicWorkers.bye(req.publicWorker), PUBLIC_WORKER],
+
     // ---- study set (per user) ----
     ['GET', /^\/api\/study$/, (req) => ({ lines: req.user ? store.listStudyLines(req.scope) : [], now: new Date().toISOString(), signInRequired: !req.user }), PUBLIC],
     ['POST', /^\/api\/study$/, (req) => {
@@ -320,6 +339,11 @@ export function createApp({ store, book, deepener, explorer = null, machines = n
             const token = /^Bearer\s+(\S+)$/.exec(req.headers.authorization || '')?.[1];
             req.machine = needMachines().machineForToken(token);
             if (!req.machine) throw httpError(401, 'unknown or stopped machine');
+          } else if (opts.access === 'public-worker') {
+            const token = /^Bearer\s+(\S+)$/.exec(req.headers.authorization || '')?.[1];
+            if (!publicWorkers) throw httpError(503, 'public workers are not enabled');
+            req.publicWorker = publicWorkers.workerForToken(token);
+            if (!req.publicWorker) throw httpError(401, 'unknown or stopped worker');
           } else {
             req.user = auth.userFromRequest(req);
             req.scope = auth.scopeFor(req.user);

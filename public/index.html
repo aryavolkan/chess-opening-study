@@ -298,6 +298,22 @@
           <a class="btn" href="/api/analysis/export" download="opening-analysis.json">export analysis JSON</a>
         </div>
       </section>
+
+      <section class="panel" id="panel-public-workers" hidden>
+        <div class="panel-head">
+          <h2>Contribute your CPU</h2>
+          <span class="badge" id="public-worker-badge">0 workers</span>
+        </div>
+        <p class="hint">Anyone can run a Stockfish worker that connects to this site, pulls the shallowest opening positions, and pushes deeper analysis back for everyone.</p>
+        <div class="public-worker-stats" id="public-worker-stats"></div>
+        <button class="btn small primary" id="public-worker-token">Get a worker token</button>
+        <div class="public-worker-cmd" id="public-worker-cmd" hidden>
+          <label>Run this in the project folder:</label>
+          <pre id="public-worker-shell"></pre>
+          <button class="btn small" id="public-worker-copy">copy command</button>
+        </div>
+        <p class="hint">The worker stops by itself when idle or after its lifetime. You can stop it with Ctrl-C.</p>
+      </section>
     </aside>
 
     <!-- ================= tree ================= -->

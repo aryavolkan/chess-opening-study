@@ -8,6 +8,7 @@ import { Explorer } from './explorer.js';
 import { createAuth, authConfigFromEnv } from './auth.js';
 import { Machines, machinesConfigFromEnv } from './machines.js';
 import { backendFromEnv } from './machine-backends.js';
+import { PublicWorkerPool } from './public-worker-pool.js';
 import { createApp } from './app.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -41,7 +42,12 @@ machines.on('machine', (e) => console.log(`[machines] ${e.event}: ${e.machine.na
 machines.on('request', (e) => { if (process.env.LOG_MACHINES) console.log(`[machines] request #${e.request.id} ${e.event} at depth ${e.request.progress}`); });
 machines.startHousekeeping();
 
-const app = createApp({ store, book, deepener, explorer, machines, auth, log: (level, err) => console.error(err) });
+// Public contributor workers: anyone can run a worker and help deepen the book.
+const publicWorkers = new PublicWorkerPool({ store, deepener });
+publicWorkers.on('result', (r) => { if (process.env.LOG_PUBLIC_WORKERS) console.log(`[public-worker] ${r.worker}: ${r.epd} depth ${r.depth}${r.stored ? ' stored' : ''}`); });
+publicWorkers.on('error', (err) => console.error('[public-worker] error:', err));
+
+const app = createApp({ store, book, deepener, explorer, machines, publicWorkers, auth, log: (level, err) => console.error(err) });
 const server = createServer(app);
 server.listen(PORT, HOST, () => {
   console.log(`Opening study: http://${HOST}:${PORT}  (${book.openings.length} openings, ${book.positions.length} book nodes, loaded in ${Date.now() - t0} ms)`);
@@ -70,7 +76,7 @@ server.listen(PORT, HOST, () => {
 
 function shutdown() {
   console.log('shutting down');
-  Promise.allSettled([deepener.stop(), explorer.stop(), machines.shutdown()]).finally(() => {
+  Promise.allSettled([deepener.stop(), explorer.stop(), machines.shutdown(), publicWorkers.shutdown()]).finally(() => {
     server.close();
     store.close();
     process.exit(0);

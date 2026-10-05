@@ -52,6 +52,8 @@ const state = {
   contribute: false,
   contributeCount: 0,
   helperEpd: null,
+  publicWorkers: null,
+  publicWorkerToken: null,
   games: new Map(),       // epd -> imported-game counts for the active perspective (null when none)
   gamesMoves: new Map(),  // epd -> { stats, moves } played from there in the imported games
   gamesFilter: {},        // player / colour perspective, owned by the Games panel
@@ -1041,6 +1043,29 @@ function renderDeepen() {
   $('deepen-stop').disabled = !d.running;
 }
 
+async function refreshPublicWorkers() {
+  try {
+    state.publicWorkers = await api.publicWorkers();
+    renderPublicWorkers();
+  } catch (err) {
+    if (err.status !== 503) console.error(err);
+    state.publicWorkers = null;
+  }
+}
+
+function renderPublicWorkers() {
+  const s = state.publicWorkers;
+  const badge = $('public-worker-badge');
+  const stats = $('public-worker-stats');
+  if (!s) {
+    badge.textContent = 'off';
+    stats.innerHTML = '';
+    return;
+  }
+  badge.textContent = `${s.active} worker${s.active === 1 ? '' : 's'}`;
+  stats.innerHTML = `<span>${s.active} active</span><span>${s.total} joined</span><span>${s.inflight} in flight</span><span>${s.done} done</span>`;
+}
+
 function deepenOpts() {
   return { targetDepth: Number($('deepen-depth').value), multipv: Number($('deepen-multipv').value) };
 }
@@ -1100,10 +1125,11 @@ function setTab(tab) {
   $('panel-games').hidden = tab !== 'games';
   $('panel-analysis-stats').hidden = tab !== 'analysis';
   $('panel-deepen').hidden = tab !== 'analysis';
+  $('panel-public-workers').hidden = tab !== 'analysis';
   $('panel-book').hidden = tab === 'analysis';
   if (tab === 'study') { refreshStudy(); explorerPanel.show(); } else explorerPanel.hide();
   if (tab === 'games') games.show(); else games.hide();
-  if (tab === 'analysis') { refreshStats(); refreshDeepen(); }
+  if (tab === 'analysis') { refreshStats(); refreshDeepen(); refreshPublicWorkers(); }
 }
 
 function showTooltip(html, e) {
@@ -1227,6 +1253,21 @@ function bind() {
     if (state.contribute) contributeLoop();
     else helper.stop();
   };
+  $('public-worker-token').onclick = async () => {
+    try {
+      const r = await api.publicWorkerJoin(`browser-${Math.random().toString(36).slice(2, 8)}`);
+      state.publicWorkerToken = r;
+      const cmd = `WORKER_TOKEN=${r.token} WORKER_API_URL=${r.apiUrl} node server/public-worker.js`;
+      $('public-worker-shell').textContent = cmd;
+      $('public-worker-cmd').hidden = false;
+    } catch (err) {
+      flash(err.message);
+    }
+  };
+  $('public-worker-copy').onclick = () => {
+    const text = $('public-worker-shell').textContent;
+    if (text) copyText(text, 'worker command');
+  };
   document.addEventListener('keydown', (e) => {
     if (e.target.tagName === 'INPUT') return;
     if (e.key === 'ArrowLeft') goTo(state.cursor - 1);
@@ -1246,7 +1287,7 @@ function bind() {
     syncSeg();
   });
   syncSeg();
-  setInterval(() => { if (state.tab === 'analysis') { refreshDeepen(); } }, 3000);
+  setInterval(() => { if (state.tab === 'analysis') { refreshDeepen(); refreshPublicWorkers(); } }, 3000);
   setInterval(() => { if (state.tab === 'analysis') refreshStats(); }, 15000);
   setInterval(refreshWorkers, 3000);
 }
@@ -1267,6 +1308,7 @@ async function main() {
   refreshStudy();
   refreshDeepen();
   refreshWorkers();
+  refreshPublicWorkers();
   startEngine();
   games.refreshImports().then(() => {
     syncGamesTotal();

@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { openDb } from '../server/db.js';
 import { loadOpenings } from '../server/openings.js';
 import { createApp } from '../server/app.js';
+import { PublicWorkerPool } from '../server/public-worker-pool.js';
 
 let server;
 let base;
@@ -23,7 +24,8 @@ before(async () => {
     prioritize: (epds) => epds.length,
     nextPositions: (n) => book.positions.slice(0, n).map((p) => ({ epd: p.epd, ply: p.ply, depth: 0 })),
   };
-  server = createServer(createApp({ store, book, deepener }));
+  const publicWorkers = new PublicWorkerPool({ store, deepener });
+  server = createServer(createApp({ store, book, deepener, publicWorkers }));
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -106,6 +108,30 @@ test('workers endpoint reports active engine workers', async () => {
   assert.ok(Array.isArray(body.workers));
   assert.ok(body.at);
   assert.equal(body.workers.length, 0);
+});
+
+test('public workers can join and pull positions', async () => {
+  let r = await get('/api/public-workers');
+  let body = await r.json();
+  assert.equal(body.enabled, true);
+  assert.equal(body.active, 0);
+
+  r = await post('/api/public-workers/join', { name: 'unit' });
+  body = await r.json();
+  assert.ok(body.token);
+  assert.equal(body.name, 'unit');
+  assert.ok(body.apiUrl);
+
+  const token = body.token;
+  r = await fetch(base + '/api/public-workers/worker/next', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  body = await r.json();
+  assert.ok(body.request);
+  assert.ok(body.request.fen);
+  assert.equal(body.request.depth, 20);
 });
 
 test('study endpoints', async () => {

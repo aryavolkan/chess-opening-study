@@ -82,6 +82,12 @@ for its lifetime; anywhere else each machine is a worker process on the
 app's host. Every signed-in user can start machines, within limits the site
 sets (per person, in all, CPUs each, lifetime), and stop them again.
 
+**Public contributor workers.** On the Analysis tab, anyone can get a token
+and run `server/public-worker.js` on their own computer. The worker connects
+to the app, pulls the shallowest book positions, analyses them with its own
+Stockfish, and pushes the results back into the shared store. No account or
+Fly access is needed; the worker stops itself when idle or after its lifetime.
+
 **Opening explorer.** On the Study tab, queue a search for openings worth
 playing: pick a colour, a scope (the whole book or everything under the
 position on the board), how many engine workers to run, and the explorer
