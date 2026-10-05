@@ -211,6 +211,19 @@ input[type=search], input[type=number] {
 .engine-foot { font-size: 11px; color: var(--text-3); margin-top: 6px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .engine-foot .saved { color: var(--good); }
 
+.deep { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px; }
+.deep-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); font-weight: 600; }
+.deep-controls { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 6px 0; font-size: 12px; color: var(--text-2); }
+.deep-list { list-style: none; margin: 4px 0; padding: 0; font-size: 12px; }
+.deep-list li { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; align-items: center; padding: 3px 4px; border-bottom: 1px solid var(--border); border-radius: 4px; }
+.deep-list li.current { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.deep-list .what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.deep-list .state { font-family: ui-monospace, monospace; font-size: 11px; white-space: nowrap; color: var(--text-3); }
+.deep-list .state.running { color: var(--accent-2); }
+.deep-list .state.done { color: var(--good); }
+.deep-list .state.failed { color: var(--bad); }
+.deep-list .state.idle { color: var(--text-2); }
+
 .chooser {
   display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px; padding: 8px 10px;
   border-radius: 6px; background: var(--surface-2); font-size: 12px; color: var(--text-2);

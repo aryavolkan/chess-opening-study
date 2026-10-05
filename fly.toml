@@ -2,7 +2,11 @@
 #   fly launch --copy-config --no-deploy
 #   fly volumes create study_data --size 1
 #   fly secrets set GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... ADMIN_EMAILS=you@example.com
+#   fly secrets set FLY_API_TOKEN="$(fly tokens create deploy -x 999999h)"   # dedicated analysis machines
 #   fly deploy
+# Analysis machines are started by the app through the Machines API as
+# process group "engine" (see server/machine-backends.js); they are not
+# listed here because they are created on demand and destroy themselves.
 # BASE_URL below must be the public origin Google redirects back to: change it
 # if the app name or the domain changes.
 app = "chess-opening-study"

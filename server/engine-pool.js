@@ -80,6 +80,10 @@ export class EnginePool {
           this.pump();
           return;
         }
+        if (w.current && m.id === w.current.id && m.progress) {
+          w.current.onProgress?.(m.progress);
+          return;
+        }
         if (w.current && m.id === w.current.id) {
           const req = w.current;
           w.current = null;
@@ -128,15 +132,15 @@ export class EnginePool {
       if (!w.ready || w.current || !this.queue.length) continue;
       const req = this.queue.shift();
       w.current = req;
-      w.child.send({ id: req.id, fen: req.fen, depth: req.depth, multipv: req.multipv });
+      w.child.send({ id: req.id, fen: req.fen, depth: req.depth, multipv: req.multipv, progress: Boolean(req.onProgress) });
     }
   }
 
-  /** Analyse a position on the next free worker. */
-  analyse(fen, { depth = 14, multipv = 3 } = {}) {
+  /** Analyse a position on the next free worker; onProgress(snapshot) is called as the depth grows. */
+  analyse(fen, { depth = 14, multipv = 3, onProgress = null } = {}) {
     if (!this.running) return Promise.reject(new Error('engine pool is not running'));
     return new Promise((resolve, reject) => {
-      this.queue.push({ id: this.nextId++, fen, depth, multipv, resolve, reject });
+      this.queue.push({ id: this.nextId++, fen, depth, multipv, onProgress, resolve, reject });
       this.pump();
     });
   }

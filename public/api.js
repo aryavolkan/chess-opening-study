@@ -73,6 +73,11 @@ export const api = {
   gamesList: (params) => request('GET', `/api/games?${qs(params)}`),
   game: (id) => request('GET', `/api/games/${id}`),
 
+  machinesStatus: () => request('GET', '/api/machines'),
+  machinesCreate: (opts) => request('POST', '/api/machines', opts || {}),
+  machinesStop: (id) => request('DELETE', `/api/machines/${id}`),
+  machinesRequest: (body) => request('POST', '/api/machines/requests', body),
+  machinesCancel: (id) => request('DELETE', `/api/machines/requests/${id}`),
   exploreStatus: () => request('GET', '/api/explore'),
   exploreAdd: (job) => request('POST', '/api/explore/jobs', job),
   exploreRemove: (id) => request('DELETE', `/api/explore/jobs/${id}`),

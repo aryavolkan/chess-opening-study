@@ -12,7 +12,17 @@ async function drain() {
   while (queue.length) {
     const m = queue.shift();
     try {
-      const r = await engine.analyse(m.fen, { depth: m.depth, multipv: m.multipv });
+      let lastProgress = 0;
+      const r = await engine.analyse(m.fen, {
+        depth: m.depth,
+        multipv: m.multipv,
+        onProgress: m.progress ? (snap) => {
+          // Throttled: a depth-40 search reports hundreds of lines
+          if (Date.now() - lastProgress < 2000) return;
+          lastProgress = Date.now();
+          process.send({ id: m.id, progress: { depth: snap.depth, lines: snap.lines, nodes: snap.nodes } });
+        } : undefined,
+      });
       process.send({ id: m.id, result: { depth: r.depth, lines: r.lines, nodes: r.nodes, engine: r.engine, terminal: Boolean(r.terminal) } });
     } catch (err) {
       process.send({ id: m.id, error: String(err?.message || err) });

@@ -50,7 +50,7 @@ function vendorRoots() {
 
 const MAX_BODY = 2 * 1024 * 1024;
 
-export function createApp({ store, book, deepener, explorer = null, importer = new Importer({ store, book }), auth = createAuth({ store }), log = () => {} }) {
+export function createApp({ store, book, deepener, explorer = null, machines = null, importer = new Importer({ store, book }), auth = createAuth({ store }), log = () => {} }) {
   const vendors = vendorRoots();
   const openingsPayload = JSON.stringify({
     count: book.openings.length,
@@ -69,6 +69,7 @@ export function createApp({ store, book, deepener, explorer = null, importer = n
   const PUBLIC = { access: 'public' };
   const USER = { access: 'user' };
   const ADMIN = { access: 'admin' };
+  const WORKER = { access: 'worker' }; // a dedicated machine, by its bearer token
 
   const routes = [
     ['GET', /^\/api\/health$/, () => ({ ok: true, openings: book.openings.length, positions: uniqueBookEpds.size, signIn: auth.mode }), PUBLIC],
@@ -241,6 +242,17 @@ export function createApp({ store, book, deepener, explorer = null, importer = n
       return { results: store.exploreResults({ jobId, limit: req.query.get('limit') || 5000 }) };
     }, PUBLIC],
 
+    // ---- dedicated analysis machines ----
+    ['GET', /^\/api\/machines$/, (req) => needMachines().status(req.user, req.scope), PUBLIC],
+    ['POST', /^\/api\/machines$/, async (req) => ({ machine: await needMachines().create(req.user, req.body || {}) }), USER],
+    ['DELETE', /^\/api\/machines\/(\d+)$/, async (req, res, m) => ({ machine: await needMachines().stop(req.user, Number(m[1])) }), USER],
+    ['POST', /^\/api\/machines\/requests$/, (req) => needMachines().request(req.user, req.body || {}), USER],
+    ['DELETE', /^\/api\/machines\/requests\/(\d+)$/, (req, res, m) => needMachines().cancel(req.user, Number(m[1])), USER],
+    ['POST', /^\/api\/machines\/worker\/next$/, (req) => needMachines().workerNext(req.machine, req.body || {}), WORKER],
+    ['POST', /^\/api\/machines\/worker\/progress$/, (req) => needMachines().workerProgress(req.machine, req.body || {}), WORKER],
+    ['POST', /^\/api\/machines\/worker\/result$/, (req) => needMachines().workerResult(req.machine, req.body || {}), WORKER],
+    ['POST', /^\/api\/machines\/worker\/bye$/, (req) => needMachines().workerBye(req.machine), WORKER],
+
     // ---- study set (per user) ----
     ['GET', /^\/api\/study$/, (req) => ({ lines: req.user ? store.listStudyLines(req.scope) : [], now: new Date().toISOString(), signInRequired: !req.user }), PUBLIC],
     ['POST', /^\/api\/study$/, (req) => {
@@ -258,6 +270,11 @@ export function createApp({ store, book, deepener, explorer = null, importer = n
   function needExplorer() {
     if (!explorer) throw httpError(503, 'the opening explorer is not available');
     return explorer;
+  }
+
+  function needMachines() {
+    if (!machines) throw httpError(503, 'dedicated machines are not available on this server');
+    return machines;
   }
 
   /** player / color / import filter from a query or body object, plus the request's visibility scope. */
@@ -281,15 +298,22 @@ export function createApp({ store, book, deepener, explorer = null, importer = n
         return;
       }
       if (path.startsWith('/api/')) {
-        req.user = auth.userFromRequest(req);
-        req.scope = auth.scopeFor(req.user);
-        const mutating = req.method !== 'GET' && req.method !== 'HEAD';
-        if (mutating && auth.crossSite(req)) throw httpError(403, 'cross-site request refused');
         for (const [method, re, fn, opts = {}] of routes) {
           const m = re.exec(path);
           if (!m || method !== req.method) continue;
-          if (opts.access === 'user' && !req.user) throw httpError(401, 'sign in to do this');
-          if (opts.access === 'admin' && !req.user?.admin) throw httpError(req.user ? 403 : 401, req.user ? 'only an admin of this site can do this' : 'sign in to do this');
+          if (opts.access === 'worker') {
+            // Machines authenticate with the token they were started with, not a session
+            const token = /^Bearer\s+(\S+)$/.exec(req.headers.authorization || '')?.[1];
+            req.machine = needMachines().machineForToken(token);
+            if (!req.machine) throw httpError(401, 'unknown or stopped machine');
+          } else {
+            req.user = auth.userFromRequest(req);
+            req.scope = auth.scopeFor(req.user);
+            const mutating = req.method !== 'GET' && req.method !== 'HEAD';
+            if (mutating && auth.crossSite(req)) throw httpError(403, 'cross-site request refused');
+            if (opts.access === 'user' && !req.user) throw httpError(401, 'sign in to do this');
+            if (opts.access === 'admin' && !req.user?.admin) throw httpError(req.user ? 403 : 401, req.user ? 'only an admin of this site can do this' : 'sign in to do this');
+          }
           if ((method === 'POST' || method === 'PUT') && !opts.raw) req.body = await readJson(req);
           const out = await fn(req, res, m);
           if (out !== SENT) sendJson(req, res, 200, out);
