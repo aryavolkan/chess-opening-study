@@ -35,6 +35,7 @@ export function createExplorerPanel({ api, prefs, hooks }) {
     visible: false,
     timer: null,
     resultsStamp: '',
+    admin: true,
   };
 
   async function refresh() {
@@ -56,6 +57,13 @@ export function createExplorerPanel({ api, prefs, hooks }) {
   function schedule() {
     clearTimeout(st.timer);
     if (st.visible) st.timer = setTimeout(refresh, st.status?.running ? 2500 : 10000);
+  }
+
+  function renderAccess() {
+    $('explore-form').classList.toggle('locked', !st.admin);
+    $('explore-form').querySelectorAll('input, button').forEach((el) => { el.disabled = !st.admin; });
+    $('explore-admin-note').hidden = st.admin;
+    $('explore-jobs').querySelectorAll('[data-remove]').forEach((b) => { b.hidden = !st.admin; });
   }
 
   function renderStatus() {
@@ -95,6 +103,7 @@ export function createExplorerPanel({ api, prefs, hooks }) {
       };
       ul.appendChild(li);
     }
+    renderAccess();
     const sel = $('explore-results-job');
     const have = new Set([...sel.options].map((o) => o.value));
     for (const j of s.jobs) {
@@ -223,6 +232,8 @@ export function createExplorerPanel({ api, prefs, hooks }) {
   return {
     show() { st.visible = true; refresh(); },
     hide() { st.visible = false; clearTimeout(st.timer); },
+    /** Whether the viewer may queue jobs and drive the workers. */
+    setAccess({ admin }) { st.admin = admin; renderAccess(); },
   };
 }
 

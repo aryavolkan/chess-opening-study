@@ -24,6 +24,15 @@
     </nav>
     <div class="topbar-right">
       <div class="topbar-status" id="engine-status" title="Browser engine status">engine: loading…</div>
+      <div class="account" id="account" hidden>
+        <a class="btn small primary" id="sign-in" href="/auth/google">Sign in with Google</a>
+        <span class="account-user" id="account-user" hidden>
+          <img id="account-avatar" alt="" width="20" height="20" referrerpolicy="no-referrer" hidden>
+          <span id="account-name"></span>
+          <span class="badge" id="account-admin" hidden>admin</span>
+          <button class="link" id="sign-out">sign out</button>
+        </span>
+      </div>
       <div class="seg" role="radiogroup" aria-label="Colour theme" id="theme-seg">
         <button type="button" role="radio" aria-checked="true" data-theme-choice="auto" title="Follow the system setting">Auto</button>
         <button type="button" role="radio" aria-checked="false" data-theme-choice="light" title="Always light">Light</button>
@@ -55,6 +64,7 @@
             <button id="drill-all" class="btn">Drill all</button>
           </div>
         </div>
+        <p class="hint" id="study-signin" hidden>Sign in with Google to keep a study set and drill it. Everything else works without an account.</p>
         <p class="hint" id="study-empty">No lines yet. In Explore, open a variation and add it to the study set as White or Black.</p>
         <ol class="study-list" id="study-list"></ol>
       </section>
@@ -65,6 +75,7 @@
           <span class="badge" id="explore-state">stopped</span>
         </div>
         <p class="hint">Queue a search: engine workers walk every named opening in scope and score it for your colour: how sound it is, how many positions you would have to learn, how forgiving it is, and, with games imported, how often opponents let you reach it. Results come in as the workers go.</p>
+        <p class="hint admin-note" id="explore-admin-note" hidden>Only the admins of this site can queue searches and run the engine workers; the results below are visible to everyone.</p>
         <form id="explore-form" class="form-grid">
           <label>Play as
             <div class="seg" id="explore-color-seg" role="radiogroup" aria-label="Colour">
@@ -116,6 +127,7 @@
           <h2>Your games</h2>
           <span class="badge" id="games-total"></span>
         </div>
+        <p class="hint" id="import-signin" hidden>Sign in with Google to import your own games. They stay private to your account; what you see below has been shared by this site.</p>
         <form id="import-form" class="import-form">
           <label class="btn file-pick"><input type="file" id="import-file" accept=".pgn,.txt,.gz,application/x-chess-pgn,text/plain">Choose PGN…</label>
           <span class="hint" id="import-file-name">no file chosen</span>
@@ -245,6 +257,7 @@
           <h2>Server deepening</h2>
           <span class="badge" id="deepen-state">stopped</span>
         </div>
+        <p class="hint admin-note" id="deepen-admin-note" hidden>Only the admins of this site can run the server engine. The engine in your browser still analyses whatever you look at, and signed-in users can save its results.</p>
         <form id="deepen-form" class="form-grid">
           <label>Target depth <input type="number" id="deepen-depth" min="1" max="60" value="20"></label>
           <label>Lines (MultiPV) <input type="number" id="deepen-multipv" min="1" max="10" value="3"></label>

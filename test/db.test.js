@@ -97,3 +97,93 @@ test('settings round-trip JSON', () => {
   assert.deepEqual(store.getSetting('x'), { a: [1, 2] });
   store.close();
 });
+
+test('per-user scope: study sets and imports are private, shared imports are visible to all', async () => {
+  const { userScope, localScope } = await import('../server/db.js');
+  const store = openDb();
+  const alice = userScope({ id: 1, admin: false });
+  const bob = userScope({ id: 2, admin: false });
+  const admin = userScope({ id: 3, admin: true });
+  const nobody = userScope(null);
+  store.addStudyLine({ san: ['e4'], color: 'white', name: 'King pawn' }, alice);
+  store.addStudyLine({ san: ['e4'], color: 'white', name: 'King pawn' }, bob);
+  store.addStudyLine({ san: ['d4'], color: 'white', name: 'Queen pawn' }); // the local user (id 0)
+  assert.equal(store.listStudyLines(alice).length, 1);
+  assert.equal(store.listStudyLines(bob).length, 1);
+  assert.equal(store.listStudyLines(nobody).length, 0);
+  assert.equal(store.listStudyLines(admin).length, 1, 'admins also own the local user\'s lines');
+  assert.equal(store.listStudyLines(localScope()).length, 3, 'unrestricted on a self-hosted instance');
+  const bobsLine = store.listStudyLines(bob)[0];
+  assert.equal(store.removeStudyLine(bobsLine.id, alice), false);
+  assert.equal(store.recordStudyResult(bobsLine.id, true, new Date(), alice), null);
+  assert.equal(store.removeStudyLine(bobsLine.id, bob), true);
+
+  const a = store.createImport({ name: 'alice', player: null, plies: 40 }, alice);
+  const b = store.createImport({ name: 'admin', player: null, plies: 40 }, admin);
+  const game = (importId, owner, key, shared = false) => store.insertGame({ importId, userId: owner, shared, key, result: '1-0', plies: 2, moves: ['e4', 'c5'] }, [{ epd: 'start', ply: 0, move: 'e4' }]);
+  game(a, 1, 'k1');
+  game(b, 3, 'k2');
+  store.finishImport(a, { games: 1, positions: 1, duplicates: 0, invalid: 0, bytes: 1, ms: 1 });
+  store.finishImport(b, { games: 1, positions: 1, duplicates: 0, invalid: 0, bytes: 1, ms: 1 });
+  assert.deepEqual(store.listImports(alice).map((i) => [i.name, i.own]), [['alice', true]]);
+  assert.deepEqual(store.listImports(nobody), []);
+  assert.equal(store.positionStats('start', { scope: alice }).games, 1);
+  assert.equal(store.positionStats('start', { scope: nobody }), null);
+  assert.equal(store.positionStats('start', { scope: localScope() }).games, 2);
+  assert.equal(store.setImportShared(b, true), true);
+  assert.deepEqual(store.listImports(nobody).map((i) => [i.name, i.own, i.shared]), [['admin', false, true]]);
+  assert.deepEqual(store.listImports(alice).map((i) => [i.name, i.own]), [['alice', true], ['admin', false]]);
+  assert.equal(store.positionStats('start', { scope: nobody }).games, 1);
+  assert.equal(store.positionStats('start', { scope: alice }).games, 2);
+  assert.equal(store.gamesTotal(nobody).games, 1);
+  assert.equal(store.getImport(a, bob), null);
+  assert.equal(store.getImport(b, bob).shared, true);
+  const g = store.listGames({ scope: alice }).games.find((x) => x.importId === a);
+  assert.ok(store.getGame(g.id, alice));
+  assert.equal(store.getGame(g.id, bob), null);
+  store.close();
+});
+
+test('a database from before sign-in is migrated in place', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const path = join(mkdtempSync(join(tmpdir(), 'ost-')), 'old.sqlite');
+  const db = new DatabaseSync(path);
+  db.exec(`
+    CREATE TABLE study_lines (id INTEGER PRIMARY KEY AUTOINCREMENT, san TEXT NOT NULL, color TEXT NOT NULL, name TEXT NOT NULL, eco TEXT,
+      box INTEGER NOT NULL DEFAULT 0, due TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, correct INTEGER NOT NULL DEFAULT 0,
+      streak INTEGER NOT NULL DEFAULT 0, last_result TEXT, last_studied TEXT, added_at TEXT NOT NULL, UNIQUE(san, color));
+    INSERT INTO study_lines (san, color, name, due, added_at) VALUES ('e4 c5', 'black', 'Sicilian', '2026-01-01', '2026-01-01');
+    CREATE TABLE imports (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, player TEXT, games INTEGER NOT NULL DEFAULT 0,
+      positions INTEGER NOT NULL DEFAULT 0, duplicates INTEGER NOT NULL DEFAULT 0, invalid INTEGER NOT NULL DEFAULT 0, bytes INTEGER NOT NULL DEFAULT 0,
+      plies INTEGER NOT NULL, ms INTEGER, error TEXT, finished INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
+    INSERT INTO imports (name, games, positions, plies, finished, created_at) VALUES ('old', 1, 1, 40, 1, '2026-01-01');
+    CREATE TABLE games (id INTEGER PRIMARY KEY AUTOINCREMENT, import_id INTEGER NOT NULL, key TEXT NOT NULL UNIQUE, white TEXT, black TEXT,
+      result TEXT NOT NULL, date TEXT, event TEXT, site TEXT, round TEXT, white_elo INTEGER, black_elo INTEGER, eco TEXT, opening TEXT,
+      time_control TEXT, termination TEXT, plies INTEGER NOT NULL, moves TEXT NOT NULL, book_path TEXT, book_ply INTEGER NOT NULL DEFAULT 0,
+      book_eco TEXT, book_name TEXT, book_family TEXT);
+    INSERT INTO games (import_id, key, result, plies, moves) VALUES (1, 'k', '1-0', 2, 'e4 c5');
+    CREATE TABLE analysis (epd TEXT PRIMARY KEY, depth INTEGER NOT NULL, multipv INTEGER NOT NULL, best_move TEXT, score_type TEXT, score INTEGER,
+      lines TEXT NOT NULL, nodes INTEGER, engine TEXT, source TEXT, updated_at TEXT NOT NULL);
+    CREATE TABLE explore_jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, color TEXT NOT NULL, scope TEXT NOT NULL, params TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued', total INTEGER NOT NULL DEFAULT 0, done INTEGER NOT NULL DEFAULT 0, error TEXT, created_at TEXT NOT NULL,
+      started_at TEXT, finished_at TEXT);
+  `);
+  db.close();
+  const store = openDb(path);
+  const { userScope, localScope } = await import('../server/db.js');
+  assert.equal(store.listStudyLines(localScope()).length, 1, 'the old study set belongs to the local user');
+  assert.equal(store.listStudyLines(userScope({ id: 9, admin: true })).length, 1, 'and admins see it');
+  assert.equal(store.addStudyLine({ san: ['e4', 'c5'], color: 'black', name: 'Sicilian' }, userScope({ id: 7, admin: false })).created, true, 'the unique key is now per user');
+  assert.equal(store.listImports(localScope())[0].name, 'old');
+  assert.equal(store.listImports(userScope(null)).length, 0, 'old imports are private until shared');
+  assert.equal(store.listGames({ scope: localScope() }).total, 1);
+  store.saveAnalysis({ epd: 'x', depth: 3, lines: [{ multipv: 1, score: { type: 'cp', value: 0 }, pv: ['e2e4'] }], userId: 7 });
+  assert.equal(store.getAnalysis('x').depth, 3);
+  const again = openDb(path);
+  assert.equal(again.listStudyLines(localScope()).length, 2, 'both lines survive a second open: migrating twice is harmless');
+  again.close();
+  store.close();
+});

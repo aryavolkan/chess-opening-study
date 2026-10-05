@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { epdHash } from '../shared/fen.js';
 
 const SCHEMA = `
@@ -15,12 +16,17 @@ CREATE TABLE IF NOT EXISTS analysis (
   nodes      INTEGER,
   engine     TEXT,
   source     TEXT,
+  user_id    INTEGER,
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS analysis_depth ON analysis(depth);
 
+-- Per-user data carries user_id: 0 is the owner of a self-hosted instance
+-- without sign-in (and the data of such an instance before sign-in was
+-- enabled); signed-in users have their own ids.
 CREATE TABLE IF NOT EXISTS study_lines (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL DEFAULT 0,
   san        TEXT NOT NULL,
   color      TEXT NOT NULL,
   name       TEXT NOT NULL,
@@ -33,7 +39,7 @@ CREATE TABLE IF NOT EXISTS study_lines (
   last_result TEXT,
   last_studied TEXT,
   added_at   TEXT NOT NULL,
-  UNIQUE(san, color)
+  UNIQUE(user_id, san, color)
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -41,11 +47,34 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS users (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  google_sub  TEXT NOT NULL UNIQUE,
+  email       TEXT,
+  name        TEXT,
+  picture     TEXT,
+  admin       INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL,
+  last_login  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  id          TEXT PRIMARY KEY,
+  user_id     INTEGER NOT NULL,
+  created_at  TEXT NOT NULL,
+  expires_at  TEXT NOT NULL,
+  user_agent  TEXT
+);
+CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
+
 -- Imported games. One row per PGN import, one per game, and one per
 -- (position, game) pair for the first plies of every game, so "how often did
 -- this position occur and how did those games end" is an index lookup.
+-- An import is private to its owner unless an admin marks it shared.
 CREATE TABLE IF NOT EXISTS imports (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER NOT NULL DEFAULT 0,
+  shared      INTEGER NOT NULL DEFAULT 0,
   name        TEXT NOT NULL,
   player      TEXT,
   games       INTEGER NOT NULL DEFAULT 0,
@@ -63,6 +92,8 @@ CREATE TABLE IF NOT EXISTS imports (
 CREATE TABLE IF NOT EXISTS games (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   import_id   INTEGER NOT NULL,
+  user_id     INTEGER NOT NULL DEFAULT 0,
+  shared      INTEGER NOT NULL DEFAULT 0,
   key         TEXT NOT NULL UNIQUE,
   white       TEXT,
   black       TEXT,
@@ -91,6 +122,7 @@ CREATE INDEX IF NOT EXISTS games_book_name ON games(book_name);
 -- Opening explorer: queued jobs and one result row per opening scored.
 CREATE TABLE IF NOT EXISTS explore_jobs (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER NOT NULL DEFAULT 0,
   name        TEXT NOT NULL,
   color       TEXT NOT NULL,
   scope       TEXT NOT NULL,
@@ -130,6 +162,35 @@ CREATE TABLE IF NOT EXISTS game_positions (
 // Leitner boxes: how many days until a line is due again after a success.
 export const BOX_INTERVAL_DAYS = [0, 1, 3, 7, 14, 30, 60];
 
+/** The owner of a self-hosted instance without sign-in. */
+export const LOCAL_USER_ID = 0;
+
+/**
+ * Who is asking, for per-user data. `restrict` is false on a self-hosted
+ * instance without sign-in (everything is visible, writes belong to user 0)
+ * and true on a public site: a row is visible when it is shared or owned by
+ * the user; admins also own the rows of user 0.
+ */
+export function localScope() {
+  return { user: LOCAL_USER_ID, admin: true, restrict: false };
+}
+
+export function userScope(user) {
+  if (!user) return { user: null, admin: false, restrict: true };
+  return { user: user.id, admin: Boolean(user.admin), restrict: true };
+}
+
+/** Ids whose rows the scope owns, or null when unrestricted. */
+function owners(scope = localScope()) {
+  if (!scope.restrict) return null;
+  if (scope.user === null || scope.user === undefined) return [];
+  return scope.admin && scope.user !== LOCAL_USER_ID ? [scope.user, LOCAL_USER_ID] : [scope.user];
+}
+
+function ownerOf(scope = localScope()) {
+  return scope.user ?? LOCAL_USER_ID;
+}
+
 export function openDb(path = ':memory:') {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
@@ -137,7 +198,38 @@ export function openDb(path = ':memory:') {
   db.exec('PRAGMA busy_timeout = 5000');
   db.exec('PRAGMA cache_size = -32000');
   db.exec(SCHEMA);
+  migrate(db);
   return new Store(db);
+}
+
+/** Bring a database created by an older version up to the current schema. */
+function migrate(db) {
+  const columns = (table) => new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((r) => r.name));
+  const add = (table, column, definition) => {
+    if (!columns(table).has(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  };
+  add('analysis', 'user_id', 'INTEGER');
+  add('imports', 'user_id', 'INTEGER NOT NULL DEFAULT 0');
+  add('imports', 'shared', 'INTEGER NOT NULL DEFAULT 0');
+  add('games', 'user_id', 'INTEGER NOT NULL DEFAULT 0');
+  add('games', 'shared', 'INTEGER NOT NULL DEFAULT 0');
+  add('explore_jobs', 'user_id', 'INTEGER NOT NULL DEFAULT 0');
+  if (!columns('study_lines').has('user_id')) {
+    // The unique key changes from (san, color) to (user_id, san, color): rebuild.
+    db.exec(`
+      BEGIN;
+      CREATE TABLE study_lines_v2 (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL DEFAULT 0, san TEXT NOT NULL, color TEXT NOT NULL,
+        name TEXT NOT NULL, eco TEXT, box INTEGER NOT NULL DEFAULT 0, due TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+        correct INTEGER NOT NULL DEFAULT 0, streak INTEGER NOT NULL DEFAULT 0, last_result TEXT, last_studied TEXT,
+        added_at TEXT NOT NULL, UNIQUE(user_id, san, color));
+      INSERT INTO study_lines_v2 (id, user_id, san, color, name, eco, box, due, attempts, correct, streak, last_result, last_studied, added_at)
+        SELECT id, 0, san, color, name, eco, box, due, attempts, correct, streak, last_result, last_studied, added_at FROM study_lines;
+      DROP TABLE study_lines;
+      ALTER TABLE study_lines_v2 RENAME TO study_lines;
+      COMMIT;`);
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS games_user ON games(user_id)');
 }
 
 export class Store {
@@ -147,12 +239,12 @@ export class Store {
     this.stmts = {
       getAnalysis: db.prepare('SELECT * FROM analysis WHERE epd = ?'),
       upsertAnalysis: db.prepare(`
-        INSERT INTO analysis (epd, depth, multipv, best_move, score_type, score, lines, nodes, engine, source, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO analysis (epd, depth, multipv, best_move, score_type, score, lines, nodes, engine, source, user_id, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(epd) DO UPDATE SET
           depth = excluded.depth, multipv = excluded.multipv, best_move = excluded.best_move,
           score_type = excluded.score_type, score = excluded.score, lines = excluded.lines,
-          nodes = excluded.nodes, engine = excluded.engine, source = excluded.source,
+          nodes = excluded.nodes, engine = excluded.engine, source = excluded.source, user_id = excluded.user_id,
           updated_at = excluded.updated_at`),
       depthOf: db.prepare('SELECT depth, multipv FROM analysis WHERE epd = ?'),
       allDepths: db.prepare('SELECT epd, depth FROM analysis'),
@@ -160,11 +252,10 @@ export class Store {
       histogram: db.prepare('SELECT depth, COUNT(*) AS count FROM analysis GROUP BY depth ORDER BY depth'),
       allAnalysis: db.prepare('SELECT * FROM analysis ORDER BY epd'),
 
-      listStudy: db.prepare('SELECT * FROM study_lines ORDER BY due, id'),
       getStudy: db.prepare('SELECT * FROM study_lines WHERE id = ?'),
-      findStudy: db.prepare('SELECT * FROM study_lines WHERE san = ? AND color = ?'),
-      insertStudy: db.prepare(`INSERT INTO study_lines (san, color, name, eco, box, due, added_at)
-        VALUES (?, ?, ?, ?, 0, ?, ?)`),
+      findStudy: db.prepare('SELECT * FROM study_lines WHERE user_id = ? AND san = ? AND color = ?'),
+      insertStudy: db.prepare(`INSERT INTO study_lines (user_id, san, color, name, eco, box, due, added_at)
+        VALUES (?, ?, ?, ?, ?, 0, ?, ?)`),
       deleteStudy: db.prepare('DELETE FROM study_lines WHERE id = ?'),
       updateStudy: db.prepare(`UPDATE study_lines SET box = ?, due = ?, attempts = attempts + 1,
         correct = correct + ?, streak = ?, last_result = ?, last_studied = ? WHERE id = ?`),
@@ -172,23 +263,34 @@ export class Store {
       getSetting: db.prepare('SELECT value FROM settings WHERE key = ?'),
       setSetting: db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
 
-      insertImport: db.prepare('INSERT INTO imports (name, player, plies, created_at) VALUES (?, ?, ?, ?)'),
+      getUser: db.prepare('SELECT * FROM users WHERE id = ?'),
+      getUserBySub: db.prepare('SELECT * FROM users WHERE google_sub = ?'),
+      insertUser: db.prepare('INSERT INTO users (google_sub, email, name, picture, admin, created_at, last_login) VALUES (?, ?, ?, ?, ?, ?, ?)'),
+      updateUser: db.prepare('UPDATE users SET email = ?, name = ?, picture = ?, admin = ?, last_login = ? WHERE id = ?'),
+      listUsers: db.prepare('SELECT * FROM users ORDER BY id'),
+      insertSession: db.prepare('INSERT INTO sessions (id, user_id, created_at, expires_at, user_agent) VALUES (?, ?, ?, ?, ?)'),
+      getSession: db.prepare('SELECT * FROM sessions WHERE id = ?'),
+      deleteSession: db.prepare('DELETE FROM sessions WHERE id = ?'),
+      deleteUserSessions: db.prepare('DELETE FROM sessions WHERE user_id = ?'),
+      purgeSessions: db.prepare('DELETE FROM sessions WHERE expires_at < ?'),
+
+      insertImport: db.prepare('INSERT INTO imports (user_id, name, player, plies, created_at) VALUES (?, ?, ?, ?, ?)'),
       finishImport: db.prepare(`UPDATE imports SET games = ?, positions = ?, duplicates = ?, invalid = ?, bytes = ?, ms = ?, error = ?, finished = 1
         WHERE id = ?`),
-      listImports: db.prepare('SELECT * FROM imports ORDER BY id DESC'),
       getImport: db.prepare('SELECT * FROM imports WHERE id = ?'),
+      shareImport: db.prepare('UPDATE imports SET shared = ? WHERE id = ?'),
+      shareGames: db.prepare('UPDATE games SET shared = ? WHERE import_id = ?'),
       deleteImportPositions: db.prepare('DELETE FROM game_positions WHERE game_id IN (SELECT id FROM games WHERE import_id = ?)'),
       deleteImportGames: db.prepare('DELETE FROM games WHERE import_id = ?'),
       deleteImport: db.prepare('DELETE FROM imports WHERE id = ?'),
-      gamesTotal: db.prepare('SELECT COUNT(*) AS games FROM games'),
-      insertGame: db.prepare(`INSERT OR IGNORE INTO games (import_id, key, white, black, result, date, event, site, round,
+      insertGame: db.prepare(`INSERT OR IGNORE INTO games (import_id, user_id, shared, key, white, black, result, date, event, site, round,
         white_elo, black_elo, eco, opening, time_control, termination, plies, moves, book_path, book_ply, book_eco, book_name, book_family)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
       insertPosition: db.prepare('INSERT OR IGNORE INTO game_positions (hash, game_id, ply, move) VALUES (?, ?, ?, ?)'),
       getGame: db.prepare('SELECT * FROM games WHERE id = ?'),
       hasGameKey: db.prepare('SELECT 1 FROM games WHERE key = ?'),
 
-      insertExploreJob: db.prepare('INSERT INTO explore_jobs (name, color, scope, params, total, created_at) VALUES (?, ?, ?, ?, ?, ?)'),
+      insertExploreJob: db.prepare('INSERT INTO explore_jobs (user_id, name, color, scope, params, total, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'),
       listExploreJobs: db.prepare('SELECT * FROM explore_jobs ORDER BY id'),
       getExploreJob: db.prepare('SELECT * FROM explore_jobs WHERE id = ?'),
       nextExploreJob: db.prepare("SELECT * FROM explore_jobs WHERE status IN ('queued', 'running') ORDER BY id LIMIT 1"),
@@ -271,6 +373,7 @@ export class Store {
       record.nodes ?? null,
       record.engine ?? null,
       record.source ?? null,
+      record.userId ?? null,
       new Date().toISOString(),
     );
     return { stored: true, analysis: this.getAnalysis(epd) };
@@ -298,42 +401,47 @@ export class Store {
     return this.stmts.allAnalysis.all().map(rowToAnalysis);
   }
 
-  // ---- study lines ----------------------------------------------------
+  // ---- study lines (per user) -------------------------------------------
 
-  listStudyLines() {
-    return this.stmts.listStudy.all().map(rowToStudy);
+  listStudyLines(scope = localScope()) {
+    const params = {};
+    const where = ownerClause(scope, params, 'user_id');
+    if (where === 'NONE') return [];
+    return this.prepared(`SELECT * FROM study_lines ${where ? `WHERE ${where}` : ''} ORDER BY due, id`).all(params).map(rowToStudy);
   }
 
-  getStudyLine(id) {
+  getStudyLine(id, scope = localScope()) {
     const row = this.stmts.getStudy.get(id);
-    return row ? rowToStudy(row) : null;
+    return row && ownsRow(scope, row.user_id) ? rowToStudy(row) : null;
   }
 
-  addStudyLine({ san, color, name, eco }) {
+  addStudyLine({ san, color, name, eco }, scope = localScope()) {
     if (!Array.isArray(san) || san.length === 0) throw new Error('san moves required');
     if (color !== 'white' && color !== 'black') throw new Error('color must be white or black');
+    const owner = ownerOf(scope);
     const key = san.join(' ');
-    const existing = this.stmts.findStudy.get(key, color);
+    const existing = this.stmts.findStudy.get(owner, key, color);
     if (existing) return { created: false, line: rowToStudy(existing) };
     const now = new Date().toISOString();
-    const result = this.stmts.insertStudy.run(key, color, name || key, eco || null, now, now);
-    return { created: true, line: this.getStudyLine(Number(result.lastInsertRowid)) };
+    const result = this.stmts.insertStudy.run(owner, key, color, name || key, eco || null, now, now);
+    return { created: true, line: this.getStudyLine(Number(result.lastInsertRowid), scope) };
   }
 
-  removeStudyLine(id) {
+  removeStudyLine(id, scope = localScope()) {
+    if (!this.getStudyLine(id, scope)) return false;
     return this.stmts.deleteStudy.run(id).changes > 0;
   }
 
   /** Record a drill result and reschedule the line (Leitner boxes). */
-  recordStudyResult(id, correct, now = new Date()) {
-    const line = this.getStudyLine(id);
+  recordStudyResult(id, correct, now = new Date(), scope = localScope()) {
+    const line = this.getStudyLine(id, scope);
     if (!line) return null;
     const box = correct ? Math.min(line.box + 1, BOX_INTERVAL_DAYS.length - 1) : 0;
     const days = BOX_INTERVAL_DAYS[box];
     const due = new Date(now.getTime() + days * 86400000).toISOString();
     const streak = correct ? line.streak + 1 : 0;
     this.stmts.updateStudy.run(box, due, correct ? 1 : 0, streak, correct ? 'correct' : 'wrong', now.toISOString(), id);
-    return this.getStudyLine(id);
+    return this.getStudyLine(id, scope);
   }
 
   // ---- settings -------------------------------------------------------
@@ -347,10 +455,61 @@ export class Store {
     this.stmts.setSetting.run(key, JSON.stringify(value));
   }
 
+  // ---- users and sessions ---------------------------------------------
+
+  /** Create or refresh a user from a verified Google identity. */
+  upsertUser({ sub, email, name, picture, admin }) {
+    const now = new Date().toISOString();
+    const existing = this.stmts.getUserBySub.get(sub);
+    if (existing) {
+      this.stmts.updateUser.run(email ?? existing.email, name ?? existing.name, picture ?? existing.picture, admin ? 1 : 0, now, existing.id);
+      return this.getUser(existing.id);
+    }
+    const r = this.stmts.insertUser.run(sub, email ?? null, name ?? null, picture ?? null, admin ? 1 : 0, now, now);
+    return this.getUser(Number(r.lastInsertRowid));
+  }
+
+  getUser(id) {
+    const row = this.stmts.getUser.get(id);
+    return row ? rowToUser(row) : null;
+  }
+
+  listUsers() {
+    return this.stmts.listUsers.all().map(rowToUser);
+  }
+
+  createSession(userId, { ttlMs = 30 * 86400000, userAgent = null } = {}) {
+    const id = randomBytes(32).toString('base64url');
+    const now = Date.now();
+    this.stmts.insertSession.run(id, userId, new Date(now).toISOString(), new Date(now + ttlMs).toISOString(), userAgent ? String(userAgent).slice(0, 200) : null);
+    this.stmts.purgeSessions.run(new Date(now).toISOString());
+    return id;
+  }
+
+  /** The user of a live session, or null (expired sessions are removed). */
+  sessionUser(id) {
+    if (!id) return null;
+    const s = this.stmts.getSession.get(id);
+    if (!s) return null;
+    if (Date.parse(s.expires_at) < Date.now()) {
+      this.stmts.deleteSession.run(id);
+      return null;
+    }
+    return this.getUser(s.user_id);
+  }
+
+  deleteSession(id) {
+    return this.stmts.deleteSession.run(id).changes > 0;
+  }
+
+  deleteUserSessions(userId) {
+    return this.stmts.deleteUserSessions.run(userId).changes;
+  }
+
   // ---- imported games -------------------------------------------------
 
-  createImport({ name, player, plies }) {
-    const r = this.stmts.insertImport.run(name, player || null, plies, new Date().toISOString());
+  createImport({ name, player, plies }, scope = localScope()) {
+    const r = this.stmts.insertImport.run(ownerOf(scope), name, player || null, plies, new Date().toISOString());
     return Number(r.lastInsertRowid);
   }
 
@@ -359,13 +518,28 @@ export class Store {
     return this.getImport(id);
   }
 
-  getImport(id) {
+  getImport(id, scope = localScope()) {
     const row = this.stmts.getImport.get(id);
-    return row ? rowToImport(row) : null;
+    if (!row) return null;
+    if (!visibleRow(scope, row)) return null;
+    return rowToImport(row, scope);
   }
 
-  listImports() {
-    return this.stmts.listImports.all().map(rowToImport);
+  /** Imports the scope may see: its own and the shared ones (own first). */
+  listImports(scope = localScope()) {
+    const params = {};
+    const where = visibleClause(scope, params, '');
+    const rows = this.prepared(`SELECT * FROM imports ${where ? `WHERE ${where}` : ''} ORDER BY id DESC`).all(params);
+    return rows.map((r) => rowToImport(r, scope)).sort((a, b) => Number(b.own) - Number(a.own) || b.id - a.id);
+  }
+
+  /** Share an import with everyone (or make it private again); admins only, enforced by the caller. */
+  setImportShared(id, shared) {
+    return this.transaction(() => {
+      const changed = this.stmts.shareImport.run(shared ? 1 : 0, id).changes > 0;
+      if (changed) this.stmts.shareGames.run(shared ? 1 : 0, id);
+      return changed;
+    });
   }
 
   /** Remove an import with its games and positions. */
@@ -378,16 +552,17 @@ export class Store {
     });
   }
 
-  /** How many games are stored and how deep the position index goes. */
-  gamesTotal() {
-    const r = this.stmts.gamesTotal.get();
+  /** How many games the scope can see and how deep the position index goes. */
+  gamesTotal(scope = localScope()) {
+    let games = 0;
     let positions = 0;
     let plies = 0;
-    for (const imp of this.listImports()) {
+    for (const imp of this.listImports(scope)) {
+      games += imp.games;
       positions += imp.positions;
       plies = Math.max(plies, imp.plies);
     }
-    return { games: r.games, positions, plies };
+    return { games, positions, plies };
   }
 
   /**
@@ -397,7 +572,7 @@ export class Store {
    */
   insertGame(g, positions) {
     const r = this.stmts.insertGame.run(
-      g.importId, g.key, g.white ?? null, g.black ?? null, g.result || '*', g.date ?? null, g.event ?? null, g.site ?? null, g.round ?? null,
+      g.importId, g.userId ?? LOCAL_USER_ID, g.shared ? 1 : 0, g.key, g.white ?? null, g.black ?? null, g.result || '*', g.date ?? null, g.event ?? null, g.site ?? null, g.round ?? null,
       g.whiteElo ?? null, g.blackElo ?? null, g.eco ?? null, g.opening ?? null, g.timeControl ?? null, g.termination ?? null,
       g.plies, g.moves.join(' '), g.bookPath ?? null, g.bookPly ?? 0, g.bookEco ?? null, g.bookName ?? null, g.bookFamily ?? null,
     );
@@ -412,9 +587,10 @@ export class Store {
     return Boolean(this.stmts.hasGameKey.get(key));
   }
 
-  getGame(id) {
+  getGame(id, scope = localScope()) {
     const row = this.stmts.getGame.get(id);
-    return row ? rowToGame(row) : null;
+    if (!row || !visibleRow(scope, row)) return null;
+    return rowToGame(row);
   }
 
   /**
@@ -450,7 +626,7 @@ export class Store {
   /**
    * Games, most recent first. Filters: epd (games that reached a position,
    * each with the ply at which it did), eco / name / family (book
-   * classification), player / color.
+   * classification), player / color, scope (visibility).
    */
   listGames({ epd, eco, name, family, limit = 50, offset = 0, ...filter } = {}) {
     const params = {};
@@ -507,8 +683,8 @@ export class Store {
 
   // ---- opening explorer -----------------------------------------------
 
-  createExploreJob({ name, color, scope, params, total = 0 }) {
-    const r = this.stmts.insertExploreJob.run(name, color, JSON.stringify(scope), JSON.stringify(params), total, new Date().toISOString());
+  createExploreJob({ name, color, scope, params, total = 0, userId = LOCAL_USER_ID }) {
+    const r = this.stmts.insertExploreJob.run(userId, name, color, JSON.stringify(scope), JSON.stringify(params), total, new Date().toISOString());
     return this.getExploreJob(Number(r.lastInsertRowid));
   }
 
@@ -565,8 +741,38 @@ export class Store {
   }
 }
 
-/** WHERE clauses for the player / colour / import filters; adds their params. */
-// (explorer methods are on the Store above)
+// ---- scope helpers ----------------------------------------------------
+
+function ownsRow(scope, userId) {
+  const o = owners(scope);
+  return o === null || o.includes(userId);
+}
+
+function visibleRow(scope, row) {
+  return ownsRow(scope, row.user_id) || Boolean(row.shared);
+}
+
+/** `col IN (...)` for the rows the scope owns; '' when unrestricted; 'NONE' when it owns nothing. */
+function ownerClause(scope, params, col) {
+  const o = owners(scope);
+  if (o === null) return '';
+  if (!o.length) return 'NONE';
+  params.$o0 = o[0];
+  params.$o1 = o[1] ?? o[0];
+  return `${col} IN ($o0, $o1)`;
+}
+
+/** Visibility of imports/games: shared, or owned. `prefix` is 'g.' for games. */
+function visibleClause(scope, params, prefix) {
+  const o = owners(scope);
+  if (o === null) return '';
+  if (!o.length) return `${prefix}shared = 1`;
+  params.$o0 = o[0];
+  params.$o1 = o[1] ?? o[0];
+  return `(${prefix}shared = 1 OR ${prefix}user_id IN ($o0, $o1))`;
+}
+
+/** WHERE clauses for the player / colour / import / visibility filters; adds their params. */
 function gameFilter(filter, params) {
   const where = [];
   if (filter.player) {
@@ -578,6 +784,10 @@ function gameFilter(filter, params) {
   if (filter.importId) {
     params.$import = Number(filter.importId);
     where.push('g.import_id = $import');
+  }
+  if (filter.scope) {
+    const v = visibleClause(filter.scope, params, 'g.');
+    if (v) where.push(v);
   }
   return where;
 }
@@ -641,7 +851,20 @@ function rowToStudy(row) {
   };
 }
 
-function rowToImport(row) {
+function rowToUser(row) {
+  return {
+    id: row.id,
+    sub: row.google_sub,
+    email: row.email,
+    name: row.name,
+    picture: row.picture,
+    admin: Boolean(row.admin),
+    createdAt: row.created_at,
+    lastLogin: row.last_login,
+  };
+}
+
+function rowToImport(row, scope = localScope()) {
   return {
     id: row.id,
     name: row.name,
@@ -655,6 +878,9 @@ function rowToImport(row) {
     ms: row.ms,
     error: row.error,
     finished: Boolean(row.finished),
+    shared: Boolean(row.shared),
+    own: ownsRow(scope, row.user_id),
+    userId: row.user_id,
     createdAt: row.created_at,
   };
 }
@@ -689,6 +915,7 @@ function rowToGame(row) {
 function rowToExploreJob(row) {
   return {
     id: row.id,
+    userId: row.user_id,
     name: row.name,
     color: row.color,
     scope: JSON.parse(row.scope),

@@ -30,6 +30,8 @@ export function createGamesPanel({ api, prefs, hooks }) {
     imports: [],
     total: { games: 0, positions: 0, plies: 0 },
     running: null,
+    canImport: true,
+    canShare: false,
     player: prefs.get('gamesPlayer', null), // null = never chosen: follow the newest import
     color: prefs.get('gamesColor', '') || '',
     by: ['family', 'opening', 'eco'].includes(prefs.get('gamesBy')) ? prefs.get('gamesBy') : 'family',
@@ -47,7 +49,7 @@ export function createGamesPanel({ api, prefs, hooks }) {
 
   function player() {
     if (st.player !== null) return st.player;
-    const withPlayer = st.imports.find((i) => i.player);
+    const withPlayer = st.imports.find((i) => i.player && i.own);
     return withPlayer ? withPlayer.player : '';
   }
 
@@ -97,6 +99,8 @@ export function createGamesPanel({ api, prefs, hooks }) {
       st.imports = r.imports;
       st.total = r.total;
       st.running = r.running;
+      st.canImport = r.canImport !== false;
+      st.canShare = Boolean(r.canShare);
       renderImports();
       renderFilter();
       if (st.running) schedulePoll();
@@ -124,10 +128,21 @@ export function createGamesPanel({ api, prefs, hooks }) {
       if (imp.invalid) notes.push(`${fmt(imp.invalid)} with illegal moves`);
       if (imp.error) notes.push(`stopped: ${imp.error}`);
       if (!imp.finished) notes.push('importing…');
-      li.innerHTML = `<span class="imp-name" title="${esc(imp.name)}">${esc(imp.name)}</span>
-        <span class="imp-meta">${fmt(imp.games)} games${imp.player ? ` · ${esc(imp.player)}` : ''} · ${esc(when)}${notes.length ? ` · <span class="${imp.error ? 'warn' : ''}">${esc(notes.join(' · '))}</span>` : ''}</span>
-        <button class="link" data-remove="${imp.id}" title="Remove this import and its games">✕</button>`;
-      li.querySelector('[data-remove]').onclick = async () => {
+      const shareLink = st.canShare && imp.own
+        ? `<button class="link" data-share="${imp.shared ? 0 : 1}" title="${imp.shared ? 'Stop sharing these games with visitors' : 'Let everyone who opens this site see these games'}">${imp.shared ? 'make private' : 'share with everyone'}</button>`
+        : '';
+      li.innerHTML = `<span class="imp-name" title="${esc(imp.name)}">${esc(imp.name)}${imp.shared ? ' <span class="badge good" title="Visible to everyone who opens this site">shared</span>' : ''}${imp.own ? '' : ' <span class="badge" title="Shared by this site">site</span>'}</span>
+        <span class="imp-meta">${fmt(imp.games)} games${imp.player ? ` · ${esc(imp.player)}` : ''} · ${esc(when)}${notes.length ? ` · <span class="${imp.error ? 'warn' : ''}">${esc(notes.join(' · '))}</span>` : ''}${shareLink ? ` · ${shareLink}` : ''}</span>
+        ${imp.own ? `<button class="link" data-remove="${imp.id}" title="Remove this import and its games">✕</button>` : ''}`;
+      li.querySelector('[data-share]')?.addEventListener('click', async (e) => {
+        try {
+          await api.gamesShare(imp.id, e.target.dataset.share === '1');
+          await dataChanged();
+        } catch (err) {
+          hooks.flash(err.message);
+        }
+      });
+      if (imp.own) li.querySelector('[data-remove]').onclick = async () => {
         if (!confirm(`Remove "${imp.name}" and its ${fmt(imp.games)} games?`)) return;
         try {
           await api.gamesDeleteImport(imp.id);
@@ -141,7 +156,9 @@ export function createGamesPanel({ api, prefs, hooks }) {
     }
     const total = st.total.games;
     $('games-total').textContent = total ? `${fmt(total)} games · indexed to move ${Math.ceil(st.total.plies / 2)}` : '';
-    $('games-empty').hidden = total > 0 || st.imports.length > 0;
+    $('import-form').hidden = !st.canImport;
+    $('import-signin').hidden = st.canImport;
+    $('games-empty').hidden = total > 0 || st.imports.length > 0 || !st.canImport;
     $('games-overview').hidden = total === 0;
   }
 
@@ -440,6 +457,7 @@ export function createGamesPanel({ api, prefs, hooks }) {
       panel.classList.remove('drop');
       const file = e.dataTransfer?.files?.[0];
       if (!file) return;
+      if (!st.canImport) { hooks.flash('Sign in with Google to import games'); return; }
       st.file = file;
       $('import-file-name').textContent = `${file.name} (${(file.size / 1e6).toFixed(1)} MB)`;
       $('import-start').disabled = false;

@@ -55,6 +55,7 @@ const state = {
   gamesFilter: {},        // player / colour perspective, owned by the Games panel
   gamesTotal: 0,
   gamesPlies: 0,
+  auth: { mode: 'off', user: null, admin: true }, // replaced by /auth/me at start-up
 };
 
 const board = createBoard($('board'), { onMove: onBoardMove });
@@ -101,6 +102,65 @@ const drill = new Drill({
     render();
   },
 });
+
+// ---------------------------------------------------------------------------
+// account (Sign in with Google on a published site; a single local user otherwise)
+
+/** May the viewer keep a study set, import games and save analysis? */
+function canEdit() {
+  return state.auth.mode === 'off' || Boolean(state.auth.user);
+}
+
+/** May the viewer run the server engines? */
+function isAdmin() {
+  return state.auth.mode === 'off' || Boolean(state.auth.admin);
+}
+
+async function loadAuth() {
+  try {
+    const a = await api.me();
+    state.auth = { mode: a.mode, user: a.user, admin: Boolean(a.admin) };
+  } catch (err) {
+    console.error(err);
+  }
+  renderAccount();
+  applyAccess();
+}
+
+function renderAccount() {
+  const box = $('account');
+  box.hidden = state.auth.mode !== 'on';
+  if (box.hidden) return;
+  const user = state.auth.user;
+  $('sign-in').hidden = Boolean(user);
+  $('sign-in').href = `/auth/google?next=${encodeURIComponent(location.pathname + location.search)}`;
+  $('account-user').hidden = !user;
+  if (user) {
+    $('account-name').textContent = user.name || user.email || 'signed in';
+    $('account-admin').hidden = !state.auth.admin;
+    const img = $('account-avatar');
+    img.hidden = !user.picture;
+    if (user.picture) img.src = user.picture;
+  }
+}
+
+/** Show what the viewer may do; the server enforces it regardless. */
+function applyAccess() {
+  const edit = canEdit();
+  const admin = isAdmin();
+  $('study-signin').hidden = edit;
+  $('drill-due').disabled = $('drill-due').disabled || !edit;
+  $('drill-all').disabled = $('drill-all').disabled || !edit;
+  $('deepen-admin-note').hidden = admin;
+  $('deepen-form').classList.toggle('locked', !admin);
+  $('deepen-form').querySelectorAll('input, button').forEach((el) => { el.disabled = !admin; });
+  $('contribute-toggle').disabled = !edit;
+  $('contribute-status').textContent = edit
+    ? 'A second engine worker pulls the shallowest positions from the server and pushes deeper results back.'
+    : 'Sign in to let your browser deepen the server\'s analysis.';
+  explorerPanel.setAccess({ admin });
+  renderBookMoves();
+}
 
 // ---------------------------------------------------------------------------
 // imported games
@@ -392,7 +452,7 @@ async function analyseCurrent() {
 }
 
 async function maybeSave(epd, snap, final) {
-  if (!snap.lines.length || !snap.depth) return;
+  if (!snap.lines.length || !snap.depth || !canEdit()) return;
   const stored = state.analysis.get(epd)?.depth ?? 0;
   const last = Math.max(stored, state.savedDepth.get(epd) ?? 0);
   if (snap.depth <= last) return;
@@ -628,9 +688,10 @@ function renderBookMoves() {
     table.appendChild(tr);
   }
   if (!node && gm?.moves?.length) $('book-count').textContent = 'off book · your games';
-  $('add-subtree').disabled = !node || node.children.size === 0;
-  $('deepen-here').disabled = !node;
-  $('add-white').disabled = $('add-black').disabled = state.cursor === 0;
+  $('add-subtree').disabled = !node || node.children.size === 0 || !canEdit();
+  $('deepen-here').disabled = !node || !isAdmin();
+  $('add-white').disabled = $('add-black').disabled = state.cursor === 0 || !canEdit();
+  $('deepen-here').title = isAdmin() ? 'Ask the server to deepen every book position below this one first' : 'Only an admin of this site can drive the server engine';
 }
 
 function shortName(child, parent) {
@@ -788,8 +849,8 @@ function renderStudy() {
     el.appendChild(li);
   }
   $('drill-due').textContent = `Drill due (${due})`;
-  $('drill-due').disabled = due === 0;
-  $('drill-all').disabled = state.study.length === 0;
+  $('drill-due').disabled = due === 0 || !canEdit();
+  $('drill-all').disabled = state.study.length === 0 || !canEdit();
 }
 
 function relDate(iso, now) {
@@ -1097,6 +1158,14 @@ function bind() {
     renderDeepen();
   };
   $('deepen-scope-all').onclick = async () => { state.deepen = await api.deepenConfigure({ scope: [] }); renderDeepen(); };
+  $('sign-out').onclick = async () => {
+    try {
+      await api.logout();
+    } catch (err) {
+      console.error(err);
+    }
+    location.reload();
+  };
   $('contribute-toggle').onchange = (e) => {
     state.contribute = e.target.checked;
     if (state.contribute) contributeLoop();
@@ -1127,6 +1196,7 @@ function bind() {
 
 async function main() {
   bind();
+  await loadAuth();
   const { openings } = await api.openings();
   state.openings = openings;
   state.root = buildBook(openings);
@@ -1153,4 +1223,4 @@ main().catch((err) => {
 });
 
 // exported for debugging in the console
-window.openingStudy = { state, board, engine, helper, setLine, parseOpeningsTsv, games };
+window.openingStudy = { state, board, engine, helper, setLine, parseOpeningsTsv, games, loadAuth };

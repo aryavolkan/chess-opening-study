@@ -58,6 +58,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; }
 body {
   background: var(--bg);
@@ -83,6 +84,12 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 10px 0; }
 .tab.active { background: var(--surface-2); color: var(--text); border-color: var(--border); }
 .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .topbar-status { color: var(--text-3); font-size: 12px; }
+.account { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; }
+.account[hidden] { display: none; }
+.account-user { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); }
+.account-user img { border-radius: 50%; display: block; }
+.locked { opacity: .55; pointer-events: none; }
+.admin-note { color: var(--accent-2); }
 
 /* segmented control (theme) */
 .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--surface-2); }

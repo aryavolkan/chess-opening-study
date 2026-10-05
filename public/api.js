@@ -7,7 +7,11 @@ async function request(method, path, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `${method} ${path}: HTTP ${res.status}`);
+  if (!res.ok) {
+    const err = new Error(data.error || `${method} ${path}: HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
   return data;
 }
 
@@ -28,7 +32,11 @@ function upload(path, file, onProgress) {
       let data = {};
       try { data = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
       if (xhr.status >= 200 && xhr.status < 300) resolve(data);
-      else reject(new Error(data.error || `upload: HTTP ${xhr.status}`));
+      else {
+        const err = new Error(data.error || `upload: HTTP ${xhr.status}`);
+        err.status = xhr.status;
+        reject(err);
+      }
     };
     xhr.onerror = () => reject(new Error('upload failed'));
     xhr.send(file);
@@ -36,6 +44,8 @@ function upload(path, file, onProgress) {
 }
 
 export const api = {
+  me: () => request('GET', '/auth/me'),
+  logout: () => request('POST', '/auth/logout'),
   openings: () => request('GET', '/api/openings'),
   analysis: (epd) => request('GET', `/api/analysis?epd=${encodeURIComponent(epd)}`),
   analysisBatch: (epds) => request('POST', '/api/analysis/batch', { epds }),
@@ -56,6 +66,7 @@ export const api = {
   gamesImports: () => request('GET', '/api/games/imports'),
   gamesImport: (file, { name, player, onProgress } = {}) => upload(`/api/games/import?${qs({ name, player })}`, file, onProgress),
   gamesDeleteImport: (id) => request('DELETE', `/api/games/imports/${id}`),
+  gamesShare: (id, shared) => request('POST', `/api/games/imports/${id}/share`, { shared }),
   gamesPositions: (epds, filter) => request('POST', '/api/games/positions', { epds, ...filter }),
   gamesPosition: (epd, filter) => request('GET', `/api/games/position?${qs({ epd, ...filter })}`),
   gamesOpenings: (by, filter, limit) => request('GET', `/api/games/openings?${qs({ by, limit, ...filter })}`),

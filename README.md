@@ -115,6 +115,7 @@ Environment variables:
 | `LOG_DEEPEN` | unset | `1` logs every position the deepener finishes |
 | `EXPLORE` | unset | `1` starts the opening explorer's queued jobs on boot (they also resume by themselves if they were running) |
 | `LOG_EXPLORE` | unset | `1` logs every opening the explorer scores |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `BASE_URL`, `ADMIN_EMAILS` | unset | turn on Sign in with Google and accounts; see "Publishing it as a public site" |
 
 Headless deepening without the web server, for example on a machine that is
 left running overnight (it shares the database with the server):
@@ -157,13 +158,87 @@ Tests:
 npm test
 ```
 
-## Deploying
+## Publishing it as a public site
+
+Out of the box the app is a single-user tool: there is no sign-in, anyone
+who can reach it owns the study set, the imports and the server engines.
+That is right on a laptop or behind a VPN. To put it on the internet, turn
+on **Sign in with Google** and it becomes a site with accounts:
+
+| | visitors | signed-in users | admins |
+|---|---|---|---|
+| opening book, stored analysis, browser engine | yes | yes | yes |
+| games and openings that the site shares | yes | yes | yes |
+| their own study set and drills | | yes | yes |
+| importing games (private to the account) | | yes | yes |
+| saving browser analysis to the server, helping the deepener | | yes | yes |
+| server deepener, explorer jobs and workers | | | yes |
+| sharing an import with everyone | | | yes |
+
+Admins are the Google accounts whose e-mail is in `ADMIN_EMAILS`. The
+Olympiad database above, for example, is imported by an admin and then
+"shared with everyone" from the Games tab; every visitor sees it, while a
+user's own imports stay private (admins cannot see them either).
+
+**1. Create the Google OAuth client.** In the
+[Google Cloud console](https://console.cloud.google.com/apis/credentials),
+create a project, configure the OAuth consent screen (external, the app
+name and your e-mail are enough; the scopes are only `openid`, `email` and
+`profile`), then create an OAuth client ID of type *Web application* with
+the authorized redirect URI
+
+```
+https://<your host>/auth/google/callback
+```
+
+**2. Configure the server.** Sign-in is on as soon as these are set:
+
+| Variable | Meaning |
+|---|---|
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | from the OAuth client |
+| `BASE_URL` | the public origin, e.g. `https://study.example.com`; must match the redirect URI |
+| `ADMIN_EMAILS` | comma-separated e-mails of the admins |
+| `SESSION_SECRET` | optional; signs the short-lived sign-in state cookie (a random one is used otherwise) |
+| `MAX_IMPORT_MB` | optional, default 500; an upload larger than this is cut off there |
+
+Sessions are cookies (`HttpOnly`, `SameSite=Lax`, `Secure` on https) backed
+by the database and last 30 days; the ID token Google returns is verified
+locally against Google's published keys (issuer, audience, expiry, nonce,
+PKCE), and cross-site requests to the API are refused. The server never
+stores Google tokens, only the account's id, e-mail, name and picture. A
+database from before sign-in is migrated in place: its study set, imports
+and games belong to the local user, which admins also own, so an admin can
+share the imports made before the site went public.
+
+**3. Deploy.** `fly.toml` describes one always-on machine with a 1 GB volume,
+`HOST`, `PORT`, `DB_PATH` and `BASE_URL` set (change `BASE_URL` to your
+app's hostname or custom domain):
+
+```sh
+fly launch --copy-config --no-deploy
+fly volumes create study_data --size 1
+fly secrets set GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... ADMIN_EMAILS=you@example.com
+fly deploy
+```
+
+After that, every push to `main` that passes the tests deploys by itself
+through `.github/workflows/deploy.yml`, once two repository settings exist:
+the variable `FLY_APP` (the app name) and the secret `FLY_API_TOKEN` (from
+`fly tokens create deploy`). Without them the workflow does nothing.
+
+Any other host works the same way: run the container (or `npm start` with
+Node 22.5+) behind a reverse proxy that terminates HTTPS, with the
+variables above. With Caddy, for example, `study.example.com { reverse_proxy
+localhost:3000 }` is the whole configuration, and the Docker Compose file
+in the repository takes the same environment variables.
+
+## Deploying without sign-in
 
 The app is one Node process plus a SQLite file, so it needs a single machine
-with a persistent disk; it is not a static site. It has no authentication:
-anyone who can reach it can edit the study set and drive the server engine,
-so put it behind HTTPS and something like basic auth, a VPN or Tailscale if
-it is reachable from the internet.
+with a persistent disk; it is not a static site. Without the Google
+variables it has no authentication: anyone who can reach it can edit the
+study set and drive the server engine, so keep it on your own machine or
+behind a VPN or Tailscale, or publish it with sign-in as above.
 
 **Container image.** Every push to `main` runs the tests, builds the image,
 starts a container and checks that `/api/health`, the page and the engine
@@ -189,13 +264,8 @@ repository is private, pulling needs `docker login ghcr.io` with a token that
 has `read:packages`.
 
 **Fly.io.** `fly.toml` describes one always-on machine (so the deepener keeps
-running) with a 1 GB volume and a health check:
-
-```sh
-fly launch --copy-config --no-deploy
-fly volumes create study_data --size 1
-fly deploy
-```
+running) with a 1 GB volume and a health check; see "Publishing it as a
+public site" above for the commands.
 
 **Anything else.** Any host with Node 22.5+ or a container runtime and a
 persistent disk works: set `HOST=0.0.0.0` and point `DB_PATH` at the disk.
@@ -216,7 +286,8 @@ server/engine.js       Stockfish in Node with analyse(fen, {depth, multipv})
 server/deepener.js     background queue that raises stored depth
 server/engine-pool.js  pool of engine worker processes (engine-worker.js) with a request queue
 server/explorer.js     opening explorer: job queue, repertoire walk, scoring
-server/app.js          static files + JSON API
+server/auth.js         Sign in with Google (OpenID Connect), sessions, access checks
+server/app.js          static files + sign-in routes + JSON API with access levels
 public/                the page: board (chessground), engine worker, tree, drill
 public/games.js        Games tab: import, opening chart, ECO frequency map, game list
 public/explorer.js     Study tab: explorer jobs, workers and the results table
@@ -249,6 +320,13 @@ Dockerfile             image used by docker-compose.yml, fly.toml and the publis
 | POST/DELETE | `/api/explore/jobs`, `/api/explore/jobs/:id` | queue `{color, scope[], depth, horizon, replies, minGames}`; remove a job and its results |
 | POST | `/api/explore/start`, `/api/explore/stop` | start the worker pool (`{workers}`) or stop it; interrupted jobs resume where they were |
 | GET | `/api/explore/results?job=` | scored openings, best fit first |
+| GET | `/auth/me` | `{mode, user, admin}`; `/auth/google` starts sign-in, `/auth/google/callback` finishes it, `POST /auth/logout` ends the session |
+| POST | `/api/games/imports/:id/share` | `{shared}`: make an import visible to everyone (admins) |
+
+With sign-in on, routes that change per-user data need a session (401
+otherwise), the engine routes need an admin (403), and `/api/games/imports`
+answers with `canImport` and `canShare` for the viewer; game queries only
+ever return games the viewer may see.
 
 Game queries take `player=` (a name as it appears in the PGN, case-insensitive)
 and `color=white|black`; results then come with `wins` and `losses` from that

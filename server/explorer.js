@@ -24,6 +24,7 @@
 import { EventEmitter } from 'node:events';
 import { Chess } from 'chess.js';
 import { EnginePool, clampWorkers } from './engine-pool.js';
+import { localScope } from './db.js';
 import { epdOf, sideToMove } from '../shared/fen.js';
 import { findNode, walk, pathOf, nearestName, subtreeSize } from '../shared/book.js';
 
@@ -37,12 +38,14 @@ export class Explorer extends EventEmitter {
    * @param {import('./db.js').Store} o.store
    * @param {object} o.book      loaded book (root nodes carry fen/epd)
    * @param {(size:number) => {start, stop, analyse, resize, status}} [o.createPool]
+   * @param {(userId:number) => object} [o.scopeFor]  which imported games a job's creator may see
    */
-  constructor({ store, book, createPool = (size) => new EnginePool({ size }) }) {
+  constructor({ store, book, createPool = (size) => new EnginePool({ size }), scopeFor = () => localScope() }) {
     super();
     this.store = store;
     this.book = book;
     this.createPool = createPool;
+    this.scopeFor = scopeFor;
     this.pool = null;
     this.running = false;
     this.stopping = false;
@@ -78,7 +81,7 @@ export class Explorer extends EventEmitter {
   }
 
   /** Validate and queue a job. */
-  addJob(opts = {}) {
+  addJob(opts = {}, { userId = 0 } = {}) {
     const color = opts.color === 'black' ? 'black' : opts.color === 'white' ? 'white' : null;
     if (!color) throw httpError(400, 'color must be white or black');
     const scope = Array.isArray(opts.scope) ? opts.scope.map(String) : [];
@@ -92,8 +95,8 @@ export class Explorer extends EventEmitter {
     }
     const named = nearestName(node);
     const name = String(opts.name || (scope.length ? `${named ? named.name : scope.join(' ')} as ${color}` : `whole book as ${color}`)).slice(0, 200);
-    const total = this.candidates(node, params).length;
-    const job = this.store.createExploreJob({ name, color, scope, params, total });
+    const total = this.candidates(node, params, this.scopeFor(userId)).length;
+    const job = this.store.createExploreJob({ name, color, scope, params, total, userId });
     this.emit('job', job);
     return job;
   }
@@ -104,12 +107,12 @@ export class Explorer extends EventEmitter {
   }
 
   /** Named book nodes under `node` (shallowest first), filtered by minGames when games exist. */
-  candidates(node, params) {
+  candidates(node, params, viewer = localScope()) {
     const out = [];
     walk(node, (n) => { if (n.name) out.push(n); });
     out.sort((a, b) => a.ply - b.ply);
-    if (params.minGames > 0 && this.store.gamesTotal().games > 0) {
-      return out.filter((n) => (this.store.positionStats(n.epd)?.games ?? 0) >= params.minGames);
+    if (params.minGames > 0 && this.store.gamesTotal(viewer).games > 0) {
+      return out.filter((n) => (this.store.positionStats(n.epd, { scope: viewer })?.games ?? 0) >= params.minGames);
     }
     return out;
   }
@@ -176,7 +179,8 @@ export class Explorer extends EventEmitter {
       this.store.updateExploreJob(job.id, { status: 'done', error: 'scope is no longer in the book' });
       return;
     }
-    const all = this.candidates(node, job.params);
+    const viewer = this.scopeFor(job.userId);
+    const all = this.candidates(node, job.params, viewer);
     const have = new Set(this.store.exploreResultPaths(job.id));
     const todo = all.filter((n) => !have.has(pathOf(n).join(' ')));
     this.store.updateExploreJob(job.id, { status: 'running', total: all.length, done: all.length - todo.length, startedAt: true });
@@ -186,7 +190,7 @@ export class Explorer extends EventEmitter {
       this.current = { jobId: job.id, candidate: candidate.name, eco: candidate.eco, path: pathOf(candidate), done, total: all.length };
       let metrics;
       try {
-        metrics = await this.exploreCandidate(candidate, job.color, job.params);
+        metrics = await this.exploreCandidate(candidate, job.color, job.params, viewer);
       } catch (err) {
         if (!this.running) break;
         throw err;
@@ -228,11 +232,11 @@ export class Explorer extends EventEmitter {
   }
 
   /** Walk the repertoire tree of one opening and measure it. */
-  async exploreCandidate(node, color, params) {
+  async exploreCandidate(node, color, params, viewer = localScope()) {
     const us = color === 'white' ? 'w' : 'b';
     const seen = new Set();
     const m = { decisions: 0, moves: new Set(), forgiveness: [], worst: Infinity, positions: 0, leaves: 0 };
-    const useGames = this.store.gamesTotal().games > 0;
+    const useGames = this.store.gamesTotal(viewer).games > 0;
 
     const visit = async (fen, depthFromRoot) => {
       const epd = epdOf(fen);
@@ -273,7 +277,7 @@ export class Explorer extends EventEmitter {
         .slice(0, params.replies)
         .map((l) => ({ uci: l.pv[0], score: l.score }));
       if (useGames) {
-        const played = this.store.positionMoves(epd);
+        const played = this.store.positionMoves(epd, { scope: viewer });
         const total = played.reduce((n, p) => n + p.games, 0);
         if (total >= 5) {
           for (const p of played) {
@@ -310,9 +314,9 @@ export class Explorer extends EventEmitter {
     let reach = null;
     let reachSamples = null;
     if (useGames) {
-      const s = this.store.positionStats(node.epd);
+      const s = this.store.positionStats(node.epd, { scope: viewer });
       games = s ? { games: s.games, white: s.white, draws: s.draws, black: s.black } : { games: 0, white: 0, draws: 0, black: 0 };
-      ({ reach, samples: reachSamples } = this.reachability(node, us));
+      ({ reach, samples: reachSamples } = this.reachability(node, us, viewer));
     }
     const worst = Number.isFinite(m.worst) ? m.worst : evalRoot;
     const metrics = {
@@ -340,14 +344,14 @@ export class Explorer extends EventEmitter {
    * that move was chosen from that position (steps with fewer than 5 games
    * are skipped). `samples` is the smallest sample along the way.
    */
-  reachability(node, us) {
+  reachability(node, us, viewer = localScope()) {
     let reach = 1;
     let samples = Infinity;
     let any = false;
     for (let n = node; n && n.parent; n = n.parent) {
       const parent = n.parent;
       if (sideToMove(parent.epd) === us) continue; // our own move, our own choice
-      const played = this.store.positionMoves(parent.epd);
+      const played = this.store.positionMoves(parent.epd, { scope: viewer });
       const total = played.reduce((s, p) => s + p.games, 0);
       if (total < 5) continue;
       const hit = played.find((p) => p.san === n.san)?.games ?? 0;

@@ -21,6 +21,7 @@ import { makeFen, parseFen, INITIAL_FEN } from 'chessops/fen';
 import { Chess } from 'chess.js';
 import { PgnParser, normalizeDate } from '../shared/pgn.js';
 import { epdOf } from '../shared/fen.js';
+import { localScope } from './db.js';
 import { nearestName, pathOf, walk } from '../shared/book.js';
 
 export const DEFAULT_MAX_PLIES = 40;
@@ -29,6 +30,7 @@ export const MAX_MAX_PLIES = 80;
 const CACHE_PLIES = 24;
 const CACHE_MAX_NODES = 300000;
 const BATCH = 250;
+export const DEFAULT_MAX_BYTES = Math.max(1, Number(process.env.MAX_IMPORT_MB) || 500) * 1e6;
 
 export class Importer {
   constructor({ store, book }) {
@@ -49,7 +51,7 @@ export class Importer {
    * Import every game in `source` (a Readable of bytes, gzip detected
    * automatically) as one import. Resolves with the finished import record.
    */
-  async importStream(source, { name = 'PGN import', player = null, maxPlies = DEFAULT_MAX_PLIES, gzip = false, onProgress } = {}) {
+  async importStream(source, { name = 'PGN import', player = null, maxPlies = DEFAULT_MAX_PLIES, gzip = false, onProgress, scope = localScope(), maxBytes = DEFAULT_MAX_BYTES } = {}) {
     if (this.current) {
       const err = new Error('an import is already running');
       err.status = 409;
@@ -57,7 +59,8 @@ export class Importer {
     }
     const plies = clampPlies(maxPlies);
     const playerName = player && String(player).trim() ? String(player).trim().slice(0, 100) : null;
-    const id = this.store.createImport({ name: String(name).slice(0, 200), player: playerName, plies });
+    const id = this.store.createImport({ name: String(name).slice(0, 200), player: playerName, plies }, scope);
+    const owner = { userId: scope.user ?? 0, shared: false };
     const cur = { id, name, games: 0, duplicates: 0, invalid: 0, positions: 0, bytes: 0, startedAt: new Date().toISOString(), t0: Date.now() };
     this.current = cur;
     if (!this.cache) this.cache = makeCache(this.book);
@@ -70,13 +73,14 @@ export class Importer {
       const batch = pending;
       pending = [];
       this.store.transaction(() => {
-        for (const game of batch) this.insertGame(game, id, playerName, plies, cur);
+        for (const game of batch) this.insertGame(game, id, plies, cur, owner);
       });
       onProgress?.(this.status());
     };
     try {
       for await (const chunk of bytes(source, gzip)) {
         cur.bytes += chunk.length;
+        if (cur.bytes > maxBytes) throw new Error(`the file is larger than ${Math.round(maxBytes / 1e6)} MB; stopped there`);
         pending.push(...parser.push(decoder.decode(chunk, { stream: true })));
         while (pending.length >= BATCH) {
           const rest = pending.splice(BATCH);
@@ -107,7 +111,7 @@ export class Importer {
     return record;
   }
 
-  insertGame(game, importId, playerName, plies, cur) {
+  insertGame(game, importId, plies, cur, owner) {
     const h = game.headers;
     const result = game.result || '*';
     // Dedupe key from the headers and the moves as written, checked before
@@ -126,6 +130,8 @@ export class Importer {
     const positions = r.epds.map((epd, ply) => ({ epd, ply, move: ply < r.sans.length && ply < plies ? r.sans[ply] : null }));
     const id = this.store.insertGame({
       importId,
+      userId: owner.userId,
+      shared: owner.shared,
       key,
       white: h.White || null,
       black: h.Black || null,
