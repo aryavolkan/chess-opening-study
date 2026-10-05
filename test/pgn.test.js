@@ -139,6 +139,14 @@ test('an unbalanced variation or comment does not swallow the next game', () => 
   assert.deepEqual(games[3].moves, ['g3']);
 });
 
+test('a double forfeit written as 0-0 is a result, not castling', () => {
+  const games = parsePgn('[White "a"]\n[Black "b"]\n[Result "0-0"]\n\n0-0\n\n[White "c"]\n[Black "d"]\n[Result "1-0"]\n\n1. e4 e5 2. Nf3 Nc6 3. Bc4 Nf6 4. 0-0 1-0\n');
+  assert.equal(games.length, 2);
+  assert.deepEqual(games[0].moves, []);
+  assert.equal(games[0].result, '*');
+  assert.deepEqual(games[1].moves.slice(-1), ['O-O'], 'castling is still castling in a real game');
+});
+
 test('cleanSan normalises castling, glued move numbers and annotations', () => {
   assert.equal(cleanSan('0-0'), 'O-O');
   assert.equal(cleanSan('0-0-0+'), 'O-O-O+');

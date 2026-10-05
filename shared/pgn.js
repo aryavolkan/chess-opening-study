@@ -124,7 +124,10 @@ export class PgnParser {
 
   token(tok, out) {
     if (this.depth > 0) return;
-    const result = RESULTS.has(tok) ? tok : RESULT_ALIASES[tok];
+    let result = RESULTS.has(tok) ? tok : RESULT_ALIASES[tok];
+    // A double forfeit is written as a result of "0-0" (lichess broadcasts do
+    // this), which would otherwise read as castling.
+    if (!result && tok === '0-0' && this.game?.headers.Result === '0-0') result = '*';
     if (result) {
       this.ensureGame();
       this.game.result = result;
