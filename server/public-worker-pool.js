@@ -27,8 +27,23 @@ export class PublicWorkerPool extends EventEmitter {
     this.nextId = 1;
     this.totalDone = 0;
     this.totalInflight = 0;
+    this.loadWorkers();
     this.cleanup = setInterval(() => this.reapStale(), CLEANUP_MS);
     this.cleanup.unref?.();
+  }
+
+  loadWorkers() {
+    const since = new Date(Date.now() - STALE_MS).toISOString();
+    for (const row of this.store.listPublicWorkers(since)) {
+      this.workers.set(row.token_hash, {
+        hash: row.token_hash,
+        token: null, // unknown because only the hash is stored
+        name: row.name,
+        createdAt: row.created_at,
+        lastSeen: Date.parse(row.last_seen_at),
+        positions: row.positions_done,
+      });
+    }
   }
 
   shutdown() {
@@ -36,12 +51,12 @@ export class PublicWorkerPool extends EventEmitter {
   }
 
   status() {
-    const now = Date.now();
-    const active = [...this.workers.values()].filter((w) => now - w.lastSeen < STALE_MS).length;
+    const since = new Date(Date.now() - STALE_MS).toISOString();
+    const active = this.store.listPublicWorkers(since).length;
     return {
       enabled: true,
       active,
-      total: this.workers.size,
+      total: this.store.listPublicWorkers('1970-01-01T00:00:00Z').length,
       inflight: this.totalInflight,
       done: this.totalDone,
       apiUrl: null, // filled by app.js
@@ -52,14 +67,16 @@ export class PublicWorkerPool extends EventEmitter {
   join({ name = null } = {}) {
     const token = randomBytes(32).toString('base64url');
     const hash = hashToken(token);
+    const createdAt = new Date().toISOString();
     const worker = {
       hash,
       token,
       name: String(name || `worker-${hash.slice(0, 8)}`).slice(0, 50),
-      createdAt: new Date().toISOString(),
+      createdAt,
       lastSeen: Date.now(),
       positions: 0,
     };
+    this.store.createPublicWorker({ tokenHash: hash, name: worker.name, now: createdAt });
     this.workers.set(hash, worker);
     this.emit('join', worker);
     return { token, name: worker.name };
@@ -68,12 +85,36 @@ export class PublicWorkerPool extends EventEmitter {
   /** Find a worker by its bearer token. */
   workerForToken(token) {
     if (!token) return null;
-    return this.workers.get(hashToken(token)) || null;
+    const hash = hashToken(token);
+    const cached = this.workers.get(hash);
+    if (cached) return cached;
+    // Token may be from before a restart; load from DB if still fresh.
+    const row = this.store.getPublicWorker(hash);
+    if (!row) return null;
+    if (Date.now() - Date.parse(row.last_seen_at) > STALE_MS) {
+      this.store.removePublicWorker(hash);
+      return null;
+    }
+    const worker = {
+      hash,
+      token,
+      name: row.name,
+      createdAt: row.created_at,
+      lastSeen: Date.parse(row.last_seen_at),
+      positions: row.positions_done,
+    };
+    this.workers.set(hash, worker);
+    return worker;
+  }
+
+  touch(worker) {
+    worker.lastSeen = Date.now();
+    this.store.touchPublicWorker(worker.hash, { positionsDone: worker.positions });
   }
 
   /** Hand the next shallow position to a worker. */
   next(worker) {
-    worker.lastSeen = Date.now();
+    this.touch(worker);
     const target = this.deepener?.targetDepth || DEFAULT_TARGET_DEPTH;
     const multipv = this.deepener?.multipv || DEFAULT_MULTIPV;
     const positions = this.deepener?.nextPositions?.(1, target) || [];
@@ -95,7 +136,7 @@ export class PublicWorkerPool extends EventEmitter {
   }
 
   progress(worker, { id, depth, lines, nodes }) {
-    worker.lastSeen = Date.now();
+    this.touch(worker);
     const req = this.requests.get(Number(id));
     if (!req || req.workerHash !== worker.hash) return { ok: false };
     req.progress = depth || req.progress;
@@ -114,7 +155,7 @@ export class PublicWorkerPool extends EventEmitter {
   }
 
   result(worker, { id, depth, lines, nodes, engine, error }) {
-    worker.lastSeen = Date.now();
+    this.touch(worker);
     const req = this.requests.get(Number(id));
     if (!req || req.workerHash !== worker.hash) return { ok: false };
     this.requests.delete(Number(id));
@@ -139,6 +180,7 @@ export class PublicWorkerPool extends EventEmitter {
   }
 
   bye(worker) {
+    this.store.removePublicWorker(worker.hash);
     this.workers.delete(worker.hash);
     for (const [id, req] of this.requests) {
       if (req.workerHash === worker.hash) this.requests.delete(id);
@@ -148,8 +190,10 @@ export class PublicWorkerPool extends EventEmitter {
 
   reapStale() {
     const now = Date.now();
+    const staleSince = new Date(now - STALE_MS).toISOString();
     for (const [hash, w] of this.workers) {
       if (now - w.lastSeen > STALE_MS) {
+        this.store.removePublicWorker(hash);
         this.workers.delete(hash);
         for (const [id, req] of this.requests) {
           if (req.workerHash === hash) {
@@ -163,6 +207,12 @@ export class PublicWorkerPool extends EventEmitter {
       if (now - (req.lastSeen || req.issuedAt) > STALE_MS) {
         this.requests.delete(id);
         this.totalInflight = Math.max(0, this.totalInflight - 1);
+      }
+    }
+    // Clean up any workers that disappeared without saying goodbye.
+    for (const row of this.store.listPublicWorkers('1970-01-01T00:00:00Z')) {
+      if (row.last_seen_at < staleSince && !this.workers.has(row.token_hash)) {
+        this.store.removePublicWorker(row.token_hash);
       }
     }
   }

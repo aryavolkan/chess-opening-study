@@ -187,6 +187,16 @@ CREATE TABLE IF NOT EXISTS deep_requests (
 );
 CREATE INDEX IF NOT EXISTS deep_requests_user ON deep_requests(user_id, status, id);
 
+CREATE TABLE IF NOT EXISTS public_workers (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  token_hash     TEXT NOT NULL UNIQUE,
+  name           TEXT NOT NULL,
+  created_at     TEXT NOT NULL,
+  last_seen_at   TEXT NOT NULL,
+  positions_done INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS public_workers_seen ON public_workers(last_seen_at);
+
 CREATE TABLE IF NOT EXISTS game_positions (
   hash     INTEGER NOT NULL,
   game_id  INTEGER NOT NULL,
@@ -339,6 +349,11 @@ export class Store {
       listRequestsOf: db.prepare("SELECT * FROM deep_requests WHERE user_id IN (?, ?) AND (status IN ('queued', 'running') OR finished_at > ?) ORDER BY id DESC LIMIT 100"),
       listRequestsRunning: db.prepare("SELECT * FROM deep_requests WHERE status = 'running' ORDER BY id"),
       nextRequest: db.prepare("SELECT * FROM deep_requests WHERE user_id = ? AND status = 'queued' ORDER BY id LIMIT 1"),
+      insertPublicWorker: db.prepare('INSERT INTO public_workers (token_hash, name, created_at, last_seen_at, positions_done) VALUES (?, ?, ?, ?, 0)'),
+      getPublicWorker: db.prepare('SELECT * FROM public_workers WHERE token_hash = ?'),
+      listPublicWorkers: db.prepare("SELECT * FROM public_workers WHERE last_seen_at > ? ORDER BY last_seen_at DESC LIMIT 1000"),
+      touchPublicWorker: db.prepare("UPDATE public_workers SET last_seen_at = ?, positions_done = ? WHERE token_hash = ?"),
+      deletePublicWorker: db.prepare('DELETE FROM public_workers WHERE token_hash = ?'),
       requeueOfMachine: db.prepare("UPDATE deep_requests SET status = 'queued', machine_id = NULL, started_at = NULL WHERE machine_id = ? AND status = 'running'"),
 
       insertExploreJob: db.prepare('INSERT INTO explore_jobs (user_id, name, color, scope, params, total, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'),
@@ -800,6 +815,37 @@ export class Store {
   /** Every request currently being analysed, for the shared worker visualization. */
   listAllRequests() {
     return this.stmts.listRequestsRunning.all().map(rowToRequest);
+  }
+
+  /** Register a public contributor worker and return its row. */
+  createPublicWorker({ tokenHash, name, now }) {
+    const createdAt = now || new Date().toISOString();
+    this.stmts.insertPublicWorker.run(tokenHash, name, createdAt, createdAt);
+    return this.getPublicWorker(tokenHash);
+  }
+
+  getPublicWorker(tokenHash) {
+    return this.stmts.getPublicWorker.get(tokenHash) || null;
+  }
+
+  /** Workers seen since `since` (ISO string). */
+  listPublicWorkers(since) {
+    return this.stmts.listPublicWorkers.all(since);
+  }
+
+  touchPublicWorker(tokenHash, { lastSeenAt, positionsDone } = {}) {
+    const row = this.getPublicWorker(tokenHash);
+    if (!row) return null;
+    this.stmts.touchPublicWorker.run(
+      lastSeenAt || new Date().toISOString(),
+      positionsDone ?? row.positions_done,
+      tokenHash,
+    );
+    return this.getPublicWorker(tokenHash);
+  }
+
+  removePublicWorker(tokenHash) {
+    this.stmts.deletePublicWorker.run(tokenHash);
   }
 
   /** Hand the user's oldest queued request to a machine. */

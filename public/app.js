@@ -1057,13 +1057,16 @@ function renderPublicWorkers() {
   const s = state.publicWorkers;
   const badge = $('public-worker-badge');
   const stats = $('public-worker-stats');
+  const cmd = $('public-worker-shell');
   if (!s) {
     badge.textContent = 'off';
     stats.innerHTML = '';
+    cmd.textContent = '';
     return;
   }
   badge.textContent = `${s.active} worker${s.active === 1 ? '' : 's'}`;
   stats.innerHTML = `<span>${s.active} active</span><span>${s.total} joined</span><span>${s.inflight} in flight</span><span>${s.done} done</span>`;
+  cmd.textContent = `WORKER_API_URL=${s.apiUrl} node server/public-worker.js`;
 }
 
 function deepenOpts() {
@@ -1252,17 +1255,6 @@ function bind() {
     state.contribute = e.target.checked;
     if (state.contribute) contributeLoop();
     else helper.stop();
-  };
-  $('public-worker-token').onclick = async () => {
-    try {
-      const r = await api.publicWorkerJoin(`browser-${Math.random().toString(36).slice(2, 8)}`);
-      state.publicWorkerToken = r;
-      const cmd = `WORKER_TOKEN=${r.token} WORKER_API_URL=${r.apiUrl} node server/public-worker.js`;
-      $('public-worker-shell').textContent = cmd;
-      $('public-worker-cmd').hidden = false;
-    } catch (err) {
-      flash(err.message);
-    }
   };
   $('public-worker-copy').onclick = () => {
     const text = $('public-worker-shell').textContent;

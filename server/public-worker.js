@@ -8,16 +8,28 @@
 import { EnginePool } from './engine-pool.js';
 
 const API = (process.env.WORKER_API_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
-const TOKEN = process.env.WORKER_TOKEN;
+let TOKEN = process.env.WORKER_TOKEN || null;
 const CPUS = Math.max(1, Number(process.env.WORKER_CPUS) || 1);
 const IDLE_MS = Math.max(10, Number(process.env.WORKER_IDLE_SECONDS) || 180) * 1000;
 const MAX_MS = Math.max(1, Number(process.env.WORKER_MAX_MINUTES) || 120) * 60000;
 const POLL_MS = 3000;
 const PROGRESS_MS = 3000;
 
-if (!TOKEN) {
-  console.error('WORKER_TOKEN is not set. Get one from POST /api/public-workers/join');
-  process.exit(2);
+async function join() {
+  const r = await fetch(`${API}/api/public-workers/join`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: process.env.WORKER_NAME || null }),
+  });
+  if (!r.ok) throw new Error(`join failed: HTTP ${r.status}`);
+  const body = await r.json();
+  TOKEN = body.token;
+  log(`joined as ${body.name}`);
+}
+
+async function ensureToken() {
+  if (TOKEN) return;
+  await join();
 }
 
 const started = Date.now();
@@ -29,12 +41,19 @@ const log = (...a) => console.log(`[public-worker ${new Date().toISOString()}]`,
 async function call(path, body) {
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
+      await ensureToken();
       const r = await fetch(`${API}${path}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(body || {}),
       });
-      if (r.status === 401 || r.status === 410) return { stop: true, reason: `the app answered ${r.status}` };
+      if (r.status === 401) {
+        // Token may have been revoked; try to get a new one once.
+        TOKEN = null;
+        await join();
+        continue;
+      }
+      if (r.status === 410) return { stop: true, reason: `the app answered ${r.status}` };
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return await r.json();
     } catch (err) {
@@ -45,6 +64,7 @@ async function call(path, body) {
   return null;
 }
 
+await ensureToken();
 const pool = new EnginePool({ size: CPUS });
 await pool.start();
 log(`ready: ${pool.status().engine} x${CPUS}, idle limit ${IDLE_MS / 1000} s, lifetime ${MAX_MS / 60000} min`);
