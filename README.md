@@ -1,5 +1,9 @@
 # Chess Opening Study
 
+[![test](https://github.com/aryavolkan/chess-opening-study/actions/workflows/test.yml/badge.svg)](https://github.com/aryavolkan/chess-opening-study/actions/workflows/test.yml)
+[![publish](https://github.com/aryavolkan/chess-opening-study/actions/workflows/publish.yml/badge.svg)](https://github.com/aryavolkan/chess-opening-study/actions/workflows/publish.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A self-hosted web app for exploring chess openings, drilling the variations
 you choose, and building up an engine analysis of the whole opening book that
 gets deeper the longer you run it.
