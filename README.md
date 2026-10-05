@@ -47,6 +47,24 @@ shallower result. Two things keep deepening it:
 The Analysis tab shows how much of the book is covered, the depth histogram
 and the deepener's progress, and exports everything as JSON.
 
+**Your games.** Import a PGN file on the Games tab (a lichess or chess.com
+export, a tournament, a whole database; gzip is fine, and files with tens of
+thousands of games are expected) and the app shows which openings it
+contains and how they scored: a bar chart of the most played families,
+variations or ECO codes with the result split in each bar, an ECO map
+coloured by how often each code was played, and the games themselves. Give
+your name as it appears in the PGN and every result is shown from your point
+of view, as White, as Black or both. The imported games follow you through
+the rest of the app: the book moves table shows how often each move was
+played and how it went, and lists moves from your games that the book does
+not have (so off book you still see what you and your opponents played), the
+variation tree draws thicker branches for the lines you played more, and the
+position header counts the games that reached the position on the board.
+Transpositions count: a position reached by another move order still finds
+its games and its opening name. Games are deduplicated across imports, and
+each import can be removed again. Positions are indexed for the first 20
+moves (configurable); the full game is kept so it can be put on the board.
+
 **Sharing, theme and preferences.** The address bar always holds the
 position on the board (`?moves=e4 c5 Nf3`), so a reload or a pasted link
 lands on the same position; the copy buttons under the board give you that
@@ -83,6 +101,28 @@ left running overnight (it shares the database with the server):
 ```sh
 npm run deepen -- --depth 24 --multipv 3 --scope "e4 c5"
 ```
+
+Import a PGN file without the web server, for example a large archive on the
+machine that hosts the app (it shares the database with the server; `.gz` is
+detected automatically; `--plies` sets how deep positions are indexed, 40 by
+default):
+
+```sh
+npm run import-pgn -- games.pgn.gz --name "lichess 2024" --player myname
+```
+
+The same import is available over HTTP, which is handy for scripting:
+
+```sh
+curl --data-binary @games.pgn 'http://127.0.0.1:3000/api/games/import?name=games&player=myname'
+```
+
+Import speed is around 1,300 games per second on one core (positions are
+computed with chessops, and games sharing the same first moves share the
+work), so a 50,000-game export takes under a minute; the database grows by
+about 1.7 MB per 1,000 games with the default 40-ply index. Re-importing a
+file is cheap: games that are already stored are skipped before being
+replayed.
 
 Refresh the vendored opening book from lichess:
 
@@ -145,13 +185,17 @@ persistent disk works: set `HOST=0.0.0.0` and point `DB_PATH` at the disk.
 data/openings.tsv      lichess chess-openings (CC0), vendored
 shared/book.js         TSV -> move trie; used by server and browser
 shared/uci.js          UCI parsing, per-multipv accumulator, score helpers
-shared/fen.js          EPD keys (FEN without move counters)
+shared/fen.js          EPD keys (FEN without move counters), 64-bit position hash
+shared/pgn.js          streaming PGN reader: chunks in, games out
 server/openings.js     loads the book, computes the position of every node
-server/db.js           SQLite: analysis, study_lines, settings
+server/db.js           SQLite: analysis, study_lines, settings, imports, games, game_positions
+server/games.js        PGN import: replay with chessops, classify by book position, index positions
+scripts/import-pgn.js  the same import from the command line
 server/engine.js       Stockfish in Node with analyse(fen, {depth, multipv})
 server/deepener.js     background queue that raises stored depth
 server/app.js          static files + JSON API
 public/                the page: board (chessground), engine worker, tree, drill
+public/games.js        Games tab: import, opening chart, ECO frequency map, game list
 public/theme.js        Auto / Light / Dark preference, applied before first paint
 public/prefs.js        per-browser preferences in localStorage
 Dockerfile             image used by docker-compose.yml, fly.toml and the publish workflow
@@ -170,6 +214,17 @@ Dockerfile             image used by docker-compose.yml, fly.toml and the publis
 | GET | `/api/eco` | per-ECO-code coverage for the map |
 | GET/POST | `/api/deepen`, `/start`, `/stop`, `/configure`, `/prioritize`, `/next` | server deepener |
 | GET/POST/DELETE | `/api/study`, `/api/study/:id`, `/api/study/:id/result` | study set and drill results |
+| POST | `/api/games/import?name=&player=&plies=` | body = the PGN (gzip detected); streams, one import at a time |
+| GET/DELETE | `/api/games/imports`, `/api/games/imports/:id` | imports, totals and the running import's progress |
+| POST | `/api/games/positions` | `{epds[], player?, color?}` -> games / results per position |
+| GET | `/api/games/position?epd=` | one position with the moves played from it |
+| GET | `/api/games/openings?by=opening\|family\|eco` | games grouped by opening, with results |
+| GET | `/api/games?epd=&name=&family=&eco=&player=&color=` | games, most recent first (`atPly` with `epd`) |
+| GET | `/api/games/:id` | one game with its moves |
+
+Game queries take `player=` (a name as it appears in the PGN, case-insensitive)
+and `color=white|black`; results then come with `wins` and `losses` from that
+player's point of view in addition to `white`, `draws` and `black`.
 
 Positions are keyed by EPD (the first four FEN fields). Scores are stored as
 the engine reports them, from the side to move's point of view; the UI
@@ -184,6 +239,8 @@ to the browser at runtime: the engine is
 board is [chessground](https://github.com/lichess-org/chessground)
 (GPL-3.0-or-later). If you redistribute a bundle that includes them, their
 licences apply to that bundle. Move generation uses
-[chess.js](https://github.com/jhlywa/chess.js) (BSD-2-Clause). The opening
+[chess.js](https://github.com/jhlywa/chess.js) (BSD-2-Clause); the PGN
+importer replays games with [chessops](https://github.com/niklasf/chessops)
+(GPL-3.0-or-later), server side only. The opening
 book is the lichess [chess-openings](https://github.com/lichess-org/chess-openings)
 data (CC0).

@@ -11,6 +11,30 @@ async function request(method, path, body) {
   return data;
 }
 
+/** Query string from an object, skipping empty values. */
+function qs(params) {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params || {})) if (v !== undefined && v !== null && v !== '') q.set(k, String(v));
+  return q.toString();
+}
+
+/** Upload a file as the request body with progress (fetch has no upload progress). */
+function upload(path, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', path);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total); };
+    xhr.onload = () => {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+      else reject(new Error(data.error || `upload: HTTP ${xhr.status}`));
+    };
+    xhr.onerror = () => reject(new Error('upload failed'));
+    xhr.send(file);
+  });
+}
+
 export const api = {
   openings: () => request('GET', '/api/openings'),
   analysis: (epd) => request('GET', `/api/analysis?epd=${encodeURIComponent(epd)}`),
@@ -28,4 +52,13 @@ export const api = {
   studyAdd: (line) => request('POST', '/api/study', line),
   studyRemove: (id) => request('DELETE', `/api/study/${id}`),
   studyResult: (id, correct) => request('POST', `/api/study/${id}/result`, { correct }),
+
+  gamesImports: () => request('GET', '/api/games/imports'),
+  gamesImport: (file, { name, player, onProgress } = {}) => upload(`/api/games/import?${qs({ name, player })}`, file, onProgress),
+  gamesDeleteImport: (id) => request('DELETE', `/api/games/imports/${id}`),
+  gamesPositions: (epds, filter) => request('POST', '/api/games/positions', { epds, ...filter }),
+  gamesPosition: (epd, filter) => request('GET', `/api/games/position?${qs({ epd, ...filter })}`),
+  gamesOpenings: (by, filter, limit) => request('GET', `/api/games/openings?${qs({ by, limit, ...filter })}`),
+  gamesList: (params) => request('GET', `/api/games?${qs(params)}`),
+  game: (id) => request('GET', `/api/games/${id}`),
 };

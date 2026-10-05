@@ -134,3 +134,90 @@ test('static files and vendor paths, no traversal', async () => {
   r = await get('/api/nope');
   assert.equal(r.status, 404);
 });
+
+test('games: import a PGN body, query positions and openings, fetch and delete', async () => {
+  const pgn = `[Event "Test"]
+[Site "https://example.org/1"]
+[Date "2024.05.01"]
+[White "me"]
+[Black "them"]
+[Result "1-0"]
+
+1. e4 c5 2. Nf3 d6 3. d4 cxd4 4. Nxd4 Nf6 5. Nc3 a6 1-0
+
+[Event "Test"]
+[Site "https://example.org/2"]
+[White "them"]
+[Black "me"]
+[Result "1/2-1/2"]
+
+1. e4 c5 2. Nf3 Nc6 3. d4 cxd4 4. Nxd4 g6 1/2-1/2
+`;
+  let r = await fetch(base + '/api/games/import?name=unit&player=me', { method: 'POST', headers: { 'Content-Type': 'application/x-chess-pgn' }, body: pgn });
+  assert.equal(r.status, 200);
+  const { import: imp } = await r.json();
+  assert.equal(imp.games, 2);
+  assert.equal(imp.name, 'unit');
+  assert.equal(imp.player, 'me');
+
+  // gzip body, declared with Content-Encoding
+  const { gzipSync } = await import('node:zlib');
+  r = await fetch(base + '/api/games/import?name=gz', { method: 'POST', headers: { 'Content-Encoding': 'gzip' }, body: gzipSync(pgn.replace(/example.org/g, 'example.net')) });
+  assert.equal(r.status, 200);
+  const gz = (await r.json()).import;
+  assert.equal(gz.games, 2);
+
+  // nothing in the body
+  r = await fetch(base + '/api/games/import', { method: 'POST', body: 'just text, no moves' });
+  assert.equal(r.status, 400);
+
+  const list = await (await get('/api/games/imports')).json();
+  assert.equal(list.imports.length, 2);
+  assert.equal(list.total.games, 4);
+  assert.equal(list.total.plies, 40);
+  assert.equal(list.running, null);
+
+  const sicilian = 'rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq -';
+  r = await post('/api/games/positions', { epds: [sicilian, 'nope'], player: 'me' });
+  let body = await r.json();
+  assert.deepEqual(body.positions[sicilian], { games: 4, white: 2, draws: 2, black: 0, wins: 2, losses: 0 }, 'both imports have the same players');
+  assert.equal(body.positions.nope, undefined);
+  r = await post('/api/games/positions', { epds: 'x' });
+  assert.equal(r.status, 400);
+
+  r = await get('/api/games/position?epd=' + encodeURIComponent(sicilian));
+  body = await r.json();
+  assert.equal(body.stats.games, 4);
+  assert.deepEqual(body.moves.map((m) => [m.san, m.games]), [['Nf3', 4]]);
+  r = await get('/api/games/position');
+  assert.equal(r.status, 400);
+
+  r = await get('/api/games/openings?by=family&player=me&color=white');
+  body = await r.json();
+  assert.equal(body.total.games, 2);
+  assert.equal(body.groups[0].name, 'Sicilian Defense');
+  assert.equal(body.groups[0].wins, 2);
+  r = await get('/api/games/openings?by=bogus');
+  assert.equal(r.status, 400);
+
+  r = await get('/api/games?epd=' + encodeURIComponent(sicilian) + '&limit=3');
+  body = await r.json();
+  assert.equal(body.total, 4);
+  assert.equal(body.games.length, 3);
+  assert.equal(body.games[0].atPly, 2);
+  r = await get('/api/games?family=Sicilian%20Defense&player=me&color=black');
+  body = await r.json();
+  assert.equal(body.total, 2);
+  const id = body.games[0].id;
+  r = await get(`/api/games/${id}`);
+  body = await r.json();
+  assert.equal(body.game.moves.length, 8);
+  assert.equal(body.game.black, 'me');
+  r = await get('/api/games/99999');
+  assert.equal(r.status, 404);
+
+  r = await fetch(base + `/api/games/imports/${gz.id}`, { method: 'DELETE' });
+  body = await r.json();
+  assert.deepEqual(body, { removed: true, games: 2 });
+  assert.equal((await (await get('/api/games/imports')).json()).total.games, 2);
+});

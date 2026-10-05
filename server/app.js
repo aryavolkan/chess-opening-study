@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { nearestName } from '../shared/book.js';
 import { epdOf } from '../shared/fen.js';
+import { Importer } from './games.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(here, '..');
@@ -43,7 +44,7 @@ function vendorRoots() {
 
 const MAX_BODY = 2 * 1024 * 1024;
 
-export function createApp({ store, book, deepener, log = () => {} }) {
+export function createApp({ store, book, deepener, importer = new Importer({ store, book }), log = () => {} }) {
   const vendors = vendorRoots();
   const openingsPayload = JSON.stringify({
     count: book.openings.length,
@@ -149,6 +150,57 @@ export function createApp({ store, book, deepener, log = () => {} }) {
       return { queued: deepener.prioritize(epds.map(String)), status: deepener.status() };
     }],
 
+    // ---- imported games ----
+    ['GET', /^\/api\/games\/imports$/, () => ({ imports: store.listImports(), total: store.gamesTotal(), running: importer.status() })],
+    // The body is the PGN itself (optionally gzipped), streamed; not JSON.
+    ['POST', /^\/api\/games\/import$/, async (req) => {
+      const q = req.query;
+      const record = await importer.importStream(req, {
+        name: q.get('name') || 'PGN import',
+        player: q.get('player') || null,
+        maxPlies: q.has('plies') ? Number(q.get('plies')) : undefined,
+        gzip: /\bgzip\b/.test(req.headers['content-encoding'] || ''),
+      });
+      if (record.games === 0 && record.duplicates === 0) {
+        store.deleteImport(record.id);
+        throw httpError(400, record.error ? `import failed: ${record.error}` : 'no games found in the PGN');
+      }
+      return { import: record };
+    }, { raw: true }],
+    ['DELETE', /^\/api\/games\/imports\/(\d+)$/, (req, res, m) => {
+      if (importer.status()?.id === Number(m[1])) throw httpError(409, 'this import is still running');
+      return store.deleteImport(Number(m[1]));
+    }],
+    ['POST', /^\/api\/games\/positions$/, (req) => {
+      const epds = req.body?.epds;
+      if (!Array.isArray(epds) || epds.length > 5000) throw httpError(400, 'epds must be an array of at most 5000 keys');
+      return { positions: store.positionStatsMany(epds.map(String), gamesFilter(req.body || {})) };
+    }],
+    ['GET', /^\/api\/games\/position$/, (req) => {
+      const epd = req.query.get('epd') || (req.query.get('fen') ? epdOf(req.query.get('fen')) : null);
+      if (!epd) throw httpError(400, 'epd or fen query parameter required');
+      const filter = gamesFilter(queryObject(req.query));
+      return { epd, stats: store.positionStats(epd, filter), moves: store.positionMoves(epd, filter) };
+    }],
+    ['GET', /^\/api\/games\/openings$/, (req) => {
+      const q = req.query;
+      const by = q.get('by') || 'opening';
+      if (!['opening', 'family', 'eco'].includes(by)) throw httpError(400, 'by must be opening, family or eco');
+      return store.openingsSummary({ by, limit: q.get('limit') || 40, ...gamesFilter(queryObject(q)) });
+    }],
+    ['GET', /^\/api\/games$/, (req) => {
+      const q = req.query;
+      const opts = { ...gamesFilter(queryObject(q)), limit: q.get('limit') || 50, offset: q.get('offset') || 0 };
+      if (q.has('epd')) opts.epd = q.get('epd');
+      for (const k of ['eco', 'name', 'family']) if (q.has(k)) opts[k] = q.get(k) || null;
+      return store.listGames(opts);
+    }],
+    ['GET', /^\/api\/games\/(\d+)$/, (req, res, m) => {
+      const game = store.getGame(Number(m[1]));
+      if (!game) throw httpError(404, 'no such game');
+      return { game };
+    }],
+
     ['GET', /^\/api\/study$/, () => ({ lines: store.listStudyLines(), now: new Date().toISOString() })],
     ['POST', /^\/api\/study$/, (req) => {
       const b = req.body || {};
@@ -168,10 +220,10 @@ export function createApp({ store, book, deepener, log = () => {} }) {
     const path = url.pathname;
     try {
       if (path.startsWith('/api/')) {
-        for (const [method, re, fn] of routes) {
+        for (const [method, re, fn, opts = {}] of routes) {
           const m = re.exec(path);
           if (!m || method !== req.method) continue;
-          if (method === 'POST' || method === 'PUT') req.body = await readJson(req);
+          if ((method === 'POST' || method === 'PUT') && !opts.raw) req.body = await readJson(req);
           const out = await fn(req, res, m);
           if (out !== SENT) sendJson(req, res, 200, out);
           return;
@@ -203,6 +255,21 @@ function numberOrNull(v) {
 
 function stringOrNull(v) {
   return typeof v === 'string' ? v.slice(0, 100) : null;
+}
+
+/** player / color / importId filter from a query or body object. */
+function gamesFilter(o) {
+  const filter = {};
+  if (typeof o.player === 'string' && o.player.trim()) {
+    filter.player = o.player.trim();
+    if (o.color === 'white' || o.color === 'black') filter.color = o.color;
+  }
+  if (o.import && Number.isInteger(Number(o.import))) filter.importId = Number(o.import);
+  return filter;
+}
+
+function queryObject(query) {
+  return Object.fromEntries(query.entries());
 }
 
 function validateLines(lines) {

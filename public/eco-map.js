@@ -2,7 +2,11 @@
 
 const VOLUMES = ['A', 'B', 'C', 'D', 'E'];
 
-export function renderEcoMap(container, codes, { selected, onSelect, onHover }) {
+/**
+ * @param {object} o.colorOf  cell colour for a code's record (default: by average depth)
+ * @param {object} o.hasData  whether a record counts as non-empty (default: has openings)
+ */
+export function renderEcoMap(container, codes, { selected, onSelect, onHover, colorOf = (c) => depthColor(c.avgDepth), hasData = (c) => Boolean(c && c.openings) }) {
   container.innerHTML = '';
   for (const vol of VOLUMES) {
     const row = document.createElement('div');
@@ -16,10 +20,10 @@ export function renderEcoMap(container, codes, { selected, onSelect, onHover }) 
       const cell = document.createElement('div');
       cell.className = 'eco-cell';
       const c = codes[code];
-      if (!c || !c.openings) {
+      if (!hasData(c)) {
         cell.classList.add('empty');
       } else {
-        cell.style.background = depthColor(c.avgDepth);
+        cell.style.background = colorOf(c);
         if (selected === code) cell.classList.add('selected');
         cell.addEventListener('click', () => onSelect(code));
         cell.addEventListener('mouseenter', (e) => onHover(e, code, c));
@@ -38,4 +42,13 @@ export function depthColor(depth) {
   if (depth < 18) return 'var(--depth-2)';
   if (depth < 26) return 'var(--depth-3)';
   return 'var(--depth-4)';
+}
+
+/** Sequential blue ramp for a share in [0, 1] (games in an ECO code / the busiest code). */
+export function frequencyColor(share) {
+  if (!share) return 'var(--surface-2)';
+  if (share < 0.1) return 'var(--freq-1)';
+  if (share < 0.3) return 'var(--freq-2)';
+  if (share < 0.6) return 'var(--freq-3)';
+  return 'var(--freq-4)';
 }
