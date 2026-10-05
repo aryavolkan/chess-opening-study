@@ -206,8 +206,16 @@
         <button class="btn icon" id="nav-fwd" title="Forward (→)" aria-label="One move forward (Right arrow)">▶</button>
         <button class="btn icon" id="nav-end" title="End (End)" aria-label="Go to the end of the line (End)">⏭</button>
         <button class="btn icon" id="flip" title="Flip board (f)" aria-label="Flip the board (f)">⇅</button>
-        <label class="toggle"><input type="checkbox" id="engine-toggle" checked> engine</label>
-        <label class="toggle"><input type="checkbox" id="arrows-toggle" checked> book arrows</label>
+        <label class="switch" for="engine-toggle" title="Toggle browser engine">
+          <input type="checkbox" id="engine-toggle" checked>
+          <span class="switch-slider"></span>
+        </label>
+        <span class="switch-label">engine</span>
+        <label class="switch" for="arrows-toggle" title="Toggle book arrows">
+          <input type="checkbox" id="arrows-toggle" checked>
+          <span class="switch-slider"></span>
+        </label>
+        <span class="switch-label">book arrows</span>
         <span class="share" role="group" aria-label="Copy the position">
           <span class="hint">copy</span>
           <button class="btn small" id="copy-link" title="Copy a link that opens this position">link</button>

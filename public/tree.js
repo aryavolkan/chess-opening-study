@@ -159,25 +159,57 @@ export function renderTree(svg, o) {
     if (!list || !list.length) continue;
     const cx = x(pos.col);
     const cy = y(pos.row);
-    const orbit = R + 6;
-    list.forEach((w, i) => {
-      const angle = (2 * Math.PI * i) / Math.max(list.length, 1) - Math.PI / 2;
-      const wx = cx + orbit * Math.cos(angle);
-      const wy = cy + orbit * Math.sin(angle);
-      const dot = el('circle', {
-        class: `worker source-${w.source}`,
-        r: 3,
+    const spacing = 8;
+    const totalW = (list.length - 1) * spacing;
+    let wx = cx - totalW / 2;
+    const wy = cy - R - 7;
+    for (const w of list) {
+      const color = workerColor(w.source);
+      // Soft glow behind the dot
+      svg.appendChild(el('circle', {
+        class: 'worker-glow',
         cx: wx.toFixed(1),
         cy: wy.toFixed(1),
+        r: 5,
+        fill: color,
+        opacity: 0.25,
+      }));
+      const dot = el('circle', {
+        class: `worker source-${w.source}`,
+        cx: wx.toFixed(1),
+        cy: wy.toFixed(1),
+        r: 3,
+        fill: color,
+        stroke: 'var(--surface)',
+        'stroke-width': 0.8,
         'data-source': w.source,
       });
-      const label = workerLabel(w);
-      dot.appendChild(el('title', {})).textContent = label;
+      dot.appendChild(el('title', {})).textContent = workerLabel(w);
       svg.appendChild(dot);
-    });
+      wx += spacing;
+    }
+    if (list.length > 1) {
+      const badge = el('text', {
+        class: 'worker-count',
+        x: (cx + totalW / 2 + 5).toFixed(1),
+        y: (wy + 1).toFixed(1),
+      });
+      badge.textContent = list.length;
+      svg.appendChild(badge);
+    }
   }
 
   return { nodes: visible.size };
+}
+
+function workerColor(source) {
+  const map = {
+    deepener: cssVar('--accent', '#2a78d6'),
+    explorer: cssVar('--good', '#0ca30c'),
+    machine: cssVar('--accent-2', '#eb6834'),
+    browser: cssVar('--warn', '#fab219'),
+  };
+  return map[source] || cssVar('--text-3', '#8a8983');
 }
 
 function workerLabel(w) {

@@ -148,6 +148,50 @@ input[type=search], input[type=number] {
 .link { background: none; border: 0; color: var(--accent); cursor: pointer; font: inherit; font-size: 12px; padding: 0 4px; }
 .toggle { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text-2); cursor: pointer; }
 
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 38px;
+  height: 20px;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch-slider {
+  position: absolute;
+  inset: 0;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  transition: background .2s, border-color .2s;
+}
+.switch-slider::before {
+  content: '';
+  position: absolute;
+  height: 14px;
+  width: 14px;
+  left: 2px;
+  top: 2px;
+  background: var(--text);
+  border-radius: 50%;
+  transition: transform .2s;
+}
+.switch input:checked + .switch-slider {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.switch input:checked + .switch-slider::before {
+  transform: translateX(18px);
+  background: #fff;
+}
+.switch input:focus-visible + .switch-slider { outline: 2px solid var(--accent); outline-offset: 2px; }
+.switch-label {
+  font-size: 13px;
+  color: var(--text-2);
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
 /* ---- ECO map ---- */
 .eco-map { display: grid; grid-template-rows: repeat(5, 9px); grid-auto-flow: row; gap: 2px; margin: 4px 0; }
 .eco-row { display: grid; grid-template-columns: 14px repeat(100, 1fr); gap: 1px; align-items: center; }
@@ -378,12 +422,10 @@ input[type=search], input[type=number] {
 .tree .node text.more { fill: var(--accent); font-size: 11px; font-weight: 700; }
 .tree .node:hover circle { stroke: var(--accent); }
 .tree .worker { pointer-events: none; animation: worker-pulse 1.2s ease-in-out infinite; }
-.tree .worker.source-deepener { fill: var(--accent); }
-.tree .worker.source-explorer { fill: var(--good); }
-.tree .worker.source-machine { fill: var(--accent-2); }
-.tree .worker.source-browser { fill: var(--warn); }
+.tree .worker-glow { pointer-events: none; }
+.tree .worker-count { fill: var(--text-3); font-size: 9px; font-weight: 700; font-family: ui-monospace, monospace; }
 @keyframes worker-pulse {
-  0%, 100% { opacity: .85; r: 3; }
+  0%, 100% { opacity: .9; r: 3; }
   50% { opacity: 1; r: 4; }
 }
 .tree-legend { font-size: 11px; color: var(--text-3); margin-top: 6px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
