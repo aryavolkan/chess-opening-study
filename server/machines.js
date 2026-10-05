@@ -114,6 +114,7 @@ export class Machines extends EventEmitter {
       name: `engine-u${user.id}-${randomBytes(3).toString('hex')}`,
       cpus: n,
       tokenHash: hashToken(token),
+      createdAt: new Date(this.now()).toISOString(),
     });
     try {
       const { remoteId } = await this.backend.create({
