@@ -5,6 +5,7 @@ import { Chess } from 'chess.js';
 import { openDb } from '../server/db.js';
 import { loadOpenings } from '../server/openings.js';
 import { Explorer, fitScore, cpFor, DEFAULTS } from '../server/explorer.js';
+import { MAX_WORKERS } from '../server/engine-pool.js';
 import { Importer } from '../server/games.js';
 import { findNode } from '../shared/book.js';
 
@@ -86,7 +87,8 @@ test('jobs are validated, queued, run against the pool, resumed and removed', as
   explorer.on('result', (r) => results.push(r));
   const started = await explorer.start({ workers: 3 });
   assert.equal(started.running, true);
-  assert.equal(started.workers, 3);
+  const workers = Math.min(3, MAX_WORKERS); // clamped to the cores of the machine running the test
+  assert.equal(started.workers, workers);
   assert.equal(started.pool.engine, 'fake');
   await idle;
   await explorer.loop;
@@ -95,7 +97,7 @@ test('jobs are validated, queued, run against the pool, resumed and removed', as
   assert.equal(s1.jobs[0].status, 'done');
   assert.equal(s1.jobs[0].done, s1.jobs[0].total);
   assert.equal(results.length, job.total);
-  assert.deepEqual(store.getSetting('explorer'), { workers: 3, running: false });
+  assert.deepEqual(store.getSetting('explorer'), { workers, running: false });
 
   const rows = store.exploreResults({ jobId: job.id });
   assert.equal(rows.length, job.total);
