@@ -14,6 +14,9 @@ import { renderEcoMap } from '/eco-map.js';
 import { Drill } from '/study.js';
 import { initTheme } from '/theme.js';
 import { createPrefs } from '/prefs.js';
+import { createGamesPanel } from '/games.js';
+import { createExplorerPanel } from '/explorer.js';
+import { createDeepPanel } from '/deep.js';
 
 const MAX_BROWSER_DEPTH = 26;
 const MULTIPV = 3;
@@ -48,6 +51,12 @@ const state = {
   deepen: null,
   contribute: false,
   contributeCount: 0,
+  games: new Map(),       // epd -> imported-game counts for the active perspective (null when none)
+  gamesMoves: new Map(),  // epd -> { stats, moves } played from there in the imported games
+  gamesFilter: {},        // player / colour perspective, owned by the Games panel
+  gamesTotal: 0,
+  gamesPlies: 0,
+  auth: { mode: 'off', user: null, admin: true }, // replaced by /auth/me at start-up
 };
 
 const board = createBoard($('board'), { onMove: onBoardMove });
@@ -94,6 +103,204 @@ const drill = new Drill({
     render();
   },
 });
+
+// ---------------------------------------------------------------------------
+// account (Sign in with Google on a published site; a single local user otherwise)
+
+/** May the viewer keep a study set, import games and save analysis? */
+function canEdit() {
+  return state.auth.mode === 'off' || Boolean(state.auth.user);
+}
+
+/** May the viewer run the server engines? */
+function isAdmin() {
+  return state.auth.mode === 'off' || Boolean(state.auth.admin);
+}
+
+async function loadAuth() {
+  try {
+    const a = await api.me();
+    state.auth = { mode: a.mode, user: a.user, admin: Boolean(a.admin) };
+  } catch (err) {
+    console.error(err);
+  }
+  renderAccount();
+  applyAccess();
+}
+
+function renderAccount() {
+  const box = $('account');
+  box.hidden = state.auth.mode !== 'on';
+  if (box.hidden) return;
+  const user = state.auth.user;
+  $('sign-in').hidden = Boolean(user);
+  $('sign-in').href = `/auth/google?next=${encodeURIComponent(location.pathname + location.search)}`;
+  $('account-user').hidden = !user;
+  if (user) {
+    $('account-name').textContent = user.name || user.email || 'signed in';
+    $('account-admin').hidden = !state.auth.admin;
+    const img = $('account-avatar');
+    img.hidden = !user.picture;
+    if (user.picture) img.src = user.picture;
+  }
+}
+
+/** Show what the viewer may do; the server enforces it regardless. */
+function applyAccess() {
+  const edit = canEdit();
+  const admin = isAdmin();
+  $('study-signin').hidden = edit;
+  $('drill-due').disabled = $('drill-due').disabled || !edit;
+  $('drill-all').disabled = $('drill-all').disabled || !edit;
+  $('deepen-admin-note').hidden = admin;
+  $('deepen-form').classList.toggle('locked', !admin);
+  $('deepen-form').querySelectorAll('input, button').forEach((el) => { el.disabled = !admin; });
+  $('contribute-toggle').disabled = !edit;
+  $('contribute-status').textContent = edit
+    ? 'A second engine worker pulls the shallowest positions from the server and pushes deeper results back.'
+    : 'Sign in to let your browser deepen the server\'s analysis.';
+  explorerPanel.setAccess({ admin });
+  deepPanel.setAccess({ canEdit: edit, signedOut: state.auth.mode === 'on' && !state.auth.user });
+  renderBookMoves();
+}
+
+// ---------------------------------------------------------------------------
+// imported games
+
+const games = createGamesPanel({
+  api,
+  prefs,
+  hooks: {
+    onFilterChange: (filter) => { state.gamesFilter = filter; state.games.clear(); state.gamesMoves.clear(); render(); },
+    onDataChange: () => { syncGamesTotal(); state.games.clear(); state.gamesMoves.clear(); render(); },
+    onSelectLine: (sans) => { if (!state.drillActive) setLine(sans); },
+    onLoadGame: loadGame,
+    showTooltip,
+    hideTooltip,
+    flash,
+    openings: () => state.openings,
+    currentEpd: () => epdOf(state.chess.fen()),
+    currentCursor: () => state.cursor,
+  },
+});
+
+const explorerPanel = createExplorerPanel({
+  api,
+  prefs,
+  hooks: {
+    onSelectLine: (sans) => { if (!state.drillActive) setLine(sans); },
+    currentLine: () => state.line.slice(0, state.cursor),
+    flash,
+    refreshStudy: () => refreshStudy(),
+  },
+});
+
+const deepPanel = createDeepPanel({
+  api,
+  prefs,
+  hooks: {
+    currentEpd: () => epdOf(state.chess.fen()),
+    currentLine: () => state.line.slice(0, state.cursor),
+    onSelectLine: (sans) => { if (!state.drillActive) setLine(sans); },
+    flash,
+    onAnalysisChanged: (epd) => {
+      state.analysis.delete(epd);
+      state.savedDepth.delete(epd);
+      renderEngine();
+      renderEvalBar();
+      renderBookMoves();
+      renderTreeNow();
+    },
+  },
+});
+
+function syncGamesTotal() {
+  state.gamesTotal = games.total.games;
+  state.gamesPlies = games.total.plies;
+  $('tree-games-legend').hidden = !state.gamesTotal;
+}
+
+/** Game counts for positions, batched and cached per perspective. */
+async function fetchGames(epds) {
+  if (!state.gamesTotal) return false;
+  const missing = [...new Set(epds)].filter((e) => !state.games.has(e));
+  if (!missing.length) return false;
+  for (const e of missing) state.games.set(e, null);
+  const filter = state.gamesFilter;
+  try {
+    const { positions } = await api.gamesPositions(missing, filter);
+    if (filter !== state.gamesFilter) return false; // perspective changed meanwhile; the cache was cleared
+    for (const e of missing) state.games.set(e, positions[e] || null);
+  } catch (err) {
+    for (const e of missing) state.games.delete(e);
+    console.error(err);
+  }
+  return true;
+}
+
+/** The moves played from a position in the imported games, with the position's own counts. */
+async function fetchGameMoves(epd) {
+  if (!state.gamesTotal || state.gamesMoves.has(epd)) return false;
+  state.gamesMoves.set(epd, null);
+  const filter = state.gamesFilter;
+  try {
+    const r = await api.gamesPosition(epd, filter);
+    if (filter !== state.gamesFilter) return false;
+    state.gamesMoves.set(epd, { stats: r.stats, moves: r.moves });
+    state.games.set(epd, r.stats);
+  } catch (err) {
+    state.gamesMoves.delete(epd);
+    console.error(err);
+  }
+  return true;
+}
+
+/** Put an imported game on the board, with the cursor where it reached the position being looked at. */
+async function loadGame(id, atPly) {
+  if (state.drillActive) return;
+  try {
+    const { game } = await api.game(id);
+    setLine(game.moves, atPly ?? game.moves.length);
+    flash(`${game.white || '?'} – ${game.black || '?'}  ${game.result === '1/2-1/2' ? '½-½' : game.result}${game.date ? ` · ${game.date}` : ''}`);
+  } catch (err) {
+    flash(err.message);
+  }
+}
+
+/** Stacked result segments (fixed order, 2px surface gaps) for a mini bar. */
+function resultSegments(s, persp) {
+  const parts = persp ? [['w', s.wins], ['d', s.draws], ['b', s.losses]] : [['w', s.white], ['d', s.draws], ['b', s.black]];
+  const known = parts.reduce((n, [, v]) => n + v, 0);
+  if (s.games - known > 0) parts.push(['u', s.games - known]);
+  return parts.filter(([, v]) => v > 0).map(([k, v]) => `<i class="seg ${k}" style="flex:${v}"></i>`).join('');
+}
+
+function describeGames(s, persp) {
+  const p = (v) => `${Math.round((100 * v) / s.games)}%`;
+  const n = `${s.games.toLocaleString()} game${s.games === 1 ? '' : 's'}`;
+  return persp ? `${n} · wins ${p(s.wins)} · draws ${p(s.draws)} · losses ${p(s.losses)}` : `${n} · 1-0 ${p(s.white)} · ½ ${p(s.draws)} · 0-1 ${p(s.black)}`;
+}
+
+function renderPositionGames() {
+  const el = $('position-games');
+  if (!state.gamesTotal || state.drillActive) {
+    el.innerHTML = '';
+    return;
+  }
+  const epd = epdOf(state.chess.fen());
+  const known = state.gamesMoves.get(epd) || state.games.has(epd);
+  if (!known) {
+    el.innerHTML = '';
+    return;
+  }
+  const s = state.gamesMoves.get(epd)?.stats ?? state.games.get(epd);
+  if (!s) {
+    el.innerHTML = `<span class="hint">${state.cursor > state.gamesPlies ? `your games are indexed up to move ${Math.ceil(state.gamesPlies / 2)}` : 'not reached in your games'}</span>`;
+    return;
+  }
+  const persp = games.perspective();
+  el.innerHTML = `<span>your games: ${esc(describeGames(s, persp))}</span><span class="mini ${persp ? 'persp' : ''}" title="${esc(describeGames(s, persp))}">${resultSegments(s, persp)}</span>`;
+}
 
 // ---------------------------------------------------------------------------
 // position helpers
@@ -266,7 +473,7 @@ async function analyseCurrent() {
 }
 
 async function maybeSave(epd, snap, final) {
-  if (!snap.lines.length || !snap.depth) return;
+  if (!snap.lines.length || !snap.depth || !canEdit()) return;
   const stored = state.analysis.get(epd)?.depth ?? 0;
   const last = Math.max(stored, state.savedDepth.get(epd) ?? 0);
   if (snap.depth <= last) return;
@@ -297,12 +504,15 @@ function render() {
   renderBoard();
   renderMoves();
   renderHead();
+  renderPositionGames();
   renderEngine();
   renderEvalBar();
   renderBookMoves();
   renderList();
   scheduleTree();
   analyseCurrent();
+  games.setPosition(epdOf(state.chess.fen()));
+  deepPanel.render();
 }
 
 /** Keep ?moves= in the address bar equal to the position on the board, so the link can be shared. */
@@ -462,6 +672,14 @@ function renderBookMoves() {
   if (node) annotate(node);
   const epds = children.map((c) => c.epd).filter(Boolean);
   fetchAnalysis(epds).then((changed) => { if (changed) renderBookMoves(); });
+  const epd = epdOf(state.chess.fen());
+  const gm = state.gamesTotal ? state.gamesMoves.get(epd) : undefined;
+  if (state.gamesTotal && gm === undefined) fetchGameMoves(epd).then((changed) => { if (changed) { renderBookMoves(); renderPositionGames(); } });
+  const bySan = new Map((gm?.moves || []).map((m) => [m.san, m]));
+  const persp = games.perspective();
+  const gameCell = (s) => (state.gamesTotal
+    ? `<td class="games" title="${s ? esc(describeGames(s, persp)) : ''}">${s ? `${s.games.toLocaleString()}<span class="mini ${persp ? 'persp' : ''}">${resultSegments(s, persp)}</span>` : ''}</td>`
+    : '');
   const stmAfter = state.chess.turn() === 'w' ? 'b' : 'w';
   const rows = children.map((child) => ({ child, a: state.analysis.get(child.epd) }));
   // Best for the side to move first, unanalysed last
@@ -478,13 +696,24 @@ function renderBookMoves() {
     const tr = document.createElement('tr');
     const white = a ? scoreForWhite(a.score, stmAfter) : null;
     tr.innerHTML = `<td class="san">${esc(child.san)}</td><td class="name" title="${esc(child.name || '')}">${esc(child.name ? shortName(child, node) : '')}</td>
-      <td class="eval">${white ? esc(formatScore(white)) : '<span class="hint">–</span>'}</td><td class="depth">${a ? `d${a.depth}` : ''}</td>`;
+      <td class="eval">${white ? esc(formatScore(white)) : '<span class="hint">–</span>'}</td><td class="depth">${a ? `d${a.depth}` : ''}</td>${gameCell(bySan.get(child.san))}`;
     tr.onclick = () => applyMove(child.san);
     table.appendChild(tr);
   }
-  $('add-subtree').disabled = !node || node.children.size === 0;
-  $('deepen-here').disabled = !node;
-  $('add-white').disabled = $('add-black').disabled = state.cursor === 0;
+  // Moves played in the imported games that the book does not have (all of them when off book)
+  for (const m of gm?.moves || []) {
+    if (node && node.children.has(m.san)) continue;
+    const tr = document.createElement('tr');
+    tr.className = 'offbook';
+    tr.innerHTML = `<td class="san">${esc(m.san)}</td><td class="name">${node ? 'not in the book' : ''}</td><td class="eval"></td><td class="depth"></td>${gameCell(m)}`;
+    tr.onclick = () => applyMove(m.san);
+    table.appendChild(tr);
+  }
+  if (!node && gm?.moves?.length) $('book-count').textContent = 'off book · your games';
+  $('add-subtree').disabled = !node || node.children.size === 0 || !canEdit();
+  $('deepen-here').disabled = !node || !isAdmin();
+  $('add-white').disabled = $('add-black').disabled = state.cursor === 0 || !canEdit();
+  $('deepen-here').title = isAdmin() ? 'Ask the server to deepen every book position below this one first' : 'Only an admin of this site can drive the server engine';
 }
 
 function shortName(child, parent) {
@@ -541,12 +770,14 @@ function renderTreeNow() {
   const visibleEpds = [];
   walk(root, (n) => { if (n.ply - root.ply <= state.treeDepth + 1 && n.epd) visibleEpds.push(n.epd); });
   fetchAnalysis(visibleEpds.slice(0, 4000)).then((changed) => { if (changed) renderTreeNow(); });
+  fetchGames(visibleEpds.slice(0, 4000)).then((changed) => { if (changed) renderTreeNow(); });
   renderTree(svg, {
     root,
     current,
     depth: state.treeDepth,
     expanded: state.treeExpanded,
     analysis: state.analysis,
+    games: state.gamesTotal ? state.games : null,
     onSelect: (node) => { if (!state.drillActive) setLine(pathOf(node)); },
     onToggle: (node) => {
       if (state.treeExpanded.has(node)) state.treeExpanded.delete(node);
@@ -559,9 +790,11 @@ function renderTreeNow() {
     onHover: (e, node, a) => {
       if (!node) return hideTooltip();
       const named = nearestName(node);
+      const g = state.gamesTotal && node.epd ? state.games.get(node.epd) : null;
       const html = `<div class="t">${esc(pathOf(node).join(' ') || 'start')}</div>
         <div>${esc(node.name ? node.name : named ? `in ${named.name}` : '')}</div>
-        <div class="d">${esc(describeEval(a, node.epd))}${a?.bestMove ? ` · best ${esc(a.bestMove)}` : ''}${node.openings.length ? ` · ${node.openings.length} named opening${node.openings.length > 1 ? 's' : ''} end here` : ''}</div>`;
+        <div class="d">${esc(describeEval(a, node.epd))}${a?.bestMove ? ` · best ${esc(a.bestMove)}` : ''}${node.openings.length ? ` · ${node.openings.length} named opening${node.openings.length > 1 ? 's' : ''} end here` : ''}</div>
+        ${g ? `<div class="d">your games: ${esc(describeGames(g, games.perspective()))}</div>` : ''}`;
       showTooltip(html, e);
     },
   });
@@ -638,8 +871,8 @@ function renderStudy() {
     el.appendChild(li);
   }
   $('drill-due').textContent = `Drill due (${due})`;
-  $('drill-due').disabled = due === 0;
-  $('drill-all').disabled = state.study.length === 0;
+  $('drill-due').disabled = due === 0 || !canEdit();
+  $('drill-all').disabled = state.study.length === 0 || !canEdit();
 }
 
 function relDate(iso, now) {
@@ -830,10 +1063,13 @@ function setTab(tab) {
   });
   $('panel-explore-list').hidden = tab !== 'explore';
   $('panel-study-list').hidden = tab !== 'study';
+  $('panel-explorer').hidden = tab !== 'study';
+  $('panel-games').hidden = tab !== 'games';
   $('panel-analysis-stats').hidden = tab !== 'analysis';
   $('panel-deepen').hidden = tab !== 'analysis';
   $('panel-book').hidden = tab === 'analysis';
-  if (tab === 'study') refreshStudy();
+  if (tab === 'study') { refreshStudy(); explorerPanel.show(); } else explorerPanel.hide();
+  if (tab === 'games') games.show(); else games.hide();
   if (tab === 'analysis') { refreshStats(); refreshDeepen(); }
 }
 
@@ -892,7 +1128,8 @@ function bind() {
   $('engine-toggle').checked = state.engineOn;
   $('arrows-toggle').checked = state.arrowsOn;
   $('tree-depth').value = state.treeDepth;
-  $('engine-toggle').onchange = (e) => { state.engineOn = e.target.checked; prefs.set('engineOn', state.engineOn); state.live = null; state.liveEpd = null; render(); };
+  // analyseCurrent() stops the running search when the engine is switched off, as long as liveEpd still marks it
+  $('engine-toggle').onchange = (e) => { state.engineOn = e.target.checked; prefs.set('engineOn', state.engineOn); render(); };
   $('arrows-toggle').onchange = (e) => { state.arrowsOn = e.target.checked; prefs.set('arrowsOn', state.arrowsOn); renderBoard(); };
   $('copy-link').onclick = () => copyText(location.href, 'link');
   $('copy-pgn').onclick = () => copyText(sanToPgn(state.line.slice(0, state.cursor)), 'PGN');
@@ -944,6 +1181,14 @@ function bind() {
     renderDeepen();
   };
   $('deepen-scope-all').onclick = async () => { state.deepen = await api.deepenConfigure({ scope: [] }); renderDeepen(); };
+  $('sign-out').onclick = async () => {
+    try {
+      await api.logout();
+    } catch (err) {
+      console.error(err);
+    }
+    location.reload();
+  };
   $('contribute-toggle').onchange = (e) => {
     state.contribute = e.target.checked;
     if (state.contribute) contributeLoop();
@@ -974,6 +1219,7 @@ function bind() {
 
 async function main() {
   bind();
+  await loadAuth();
   const { openings } = await api.openings();
   state.openings = openings;
   state.root = buildBook(openings);
@@ -987,6 +1233,12 @@ async function main() {
   refreshStudy();
   refreshDeepen();
   startEngine();
+  games.refreshImports().then(() => {
+    syncGamesTotal();
+    state.gamesFilter = games.filter();
+    if (state.gamesTotal) render();
+  });
+  deepPanel.start();
 }
 
 main().catch((err) => {
@@ -995,4 +1247,4 @@ main().catch((err) => {
 });
 
 // exported for debugging in the console
-window.openingStudy = { state, board, engine, helper, setLine, parseOpeningsTsv };
+window.openingStudy = { state, board, engine, helper, setLine, parseOpeningsTsv, games, loadAuth, deepPanel };

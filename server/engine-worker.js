@@ -1,0 +1,41 @@
+// Entry point of one engine worker process (see engine-pool.js): loads
+// Stockfish, then answers { id, fen, depth, multipv } with { id, result }.
+import { loadEngine } from './engine.js';
+
+const engine = await loadEngine();
+const queue = [];
+let busy = false;
+
+async function drain() {
+  if (busy) return;
+  busy = true;
+  while (queue.length) {
+    const m = queue.shift();
+    try {
+      let lastProgress = 0;
+      const r = await engine.analyse(m.fen, {
+        depth: m.depth,
+        multipv: m.multipv,
+        onProgress: m.progress ? (snap) => {
+          // Throttled: a depth-40 search reports hundreds of lines
+          if (Date.now() - lastProgress < 2000) return;
+          lastProgress = Date.now();
+          process.send({ id: m.id, progress: { depth: snap.depth, lines: snap.lines, nodes: snap.nodes } });
+        } : undefined,
+      });
+      process.send({ id: m.id, result: { depth: r.depth, lines: r.lines, nodes: r.nodes, engine: r.engine, terminal: Boolean(r.terminal) } });
+    } catch (err) {
+      process.send({ id: m.id, error: String(err?.message || err) });
+    }
+  }
+  busy = false;
+}
+
+process.on('message', (m) => {
+  if (m && m.fen) {
+    queue.push(m);
+    drain();
+  }
+});
+process.on('disconnect', () => process.exit(0));
+process.send({ ready: true, name: engine.name });

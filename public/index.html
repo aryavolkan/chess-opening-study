@@ -19,10 +19,20 @@
     <nav class="tabs" role="tablist">
       <button class="tab active" data-tab="explore" role="tab" aria-selected="true">Explore</button>
       <button class="tab" data-tab="study" role="tab" aria-selected="false">Study</button>
+      <button class="tab" data-tab="games" role="tab" aria-selected="false">Games</button>
       <button class="tab" data-tab="analysis" role="tab" aria-selected="false">Analysis</button>
     </nav>
     <div class="topbar-right">
       <div class="topbar-status" id="engine-status" title="Browser engine status">engine: loading…</div>
+      <div class="account" id="account" hidden>
+        <a class="btn small primary" id="sign-in" href="/auth/google">Sign in with Google</a>
+        <span class="account-user" id="account-user" hidden>
+          <img id="account-avatar" alt="" width="20" height="20" referrerpolicy="no-referrer" hidden>
+          <span id="account-name"></span>
+          <span class="badge" id="account-admin" hidden>admin</span>
+          <button class="link" id="sign-out">sign out</button>
+        </span>
+      </div>
       <div class="seg" role="radiogroup" aria-label="Colour theme" id="theme-seg">
         <button type="button" role="radio" aria-checked="true" data-theme-choice="auto" title="Follow the system setting">Auto</button>
         <button type="button" role="radio" aria-checked="false" data-theme-choice="light" title="Always light">Light</button>
@@ -54,8 +64,114 @@
             <button id="drill-all" class="btn">Drill all</button>
           </div>
         </div>
+        <p class="hint" id="study-signin" hidden>Sign in with Google to keep a study set and drill it. Everything else works without an account.</p>
         <p class="hint" id="study-empty">No lines yet. In Explore, open a variation and add it to the study set as White or Black.</p>
         <ol class="study-list" id="study-list"></ol>
+      </section>
+
+      <section class="panel" id="panel-explorer" hidden>
+        <div class="panel-head">
+          <h2>Opening explorer</h2>
+          <span class="badge" id="explore-state">stopped</span>
+        </div>
+        <p class="hint">Queue a search: engine workers walk every named opening in scope and score it for your colour: how sound it is, how many positions you would have to learn, how forgiving it is, and, with games imported, how often opponents let you reach it. Results come in as the workers go.</p>
+        <p class="hint admin-note" id="explore-admin-note" hidden>Only the admins of this site can queue searches and run the engine workers; the results below are visible to everyone.</p>
+        <form id="explore-form" class="form-grid">
+          <label>Play as
+            <div class="seg" id="explore-color-seg" role="radiogroup" aria-label="Colour">
+              <button type="button" role="radio" aria-checked="true" data-color="white">White</button>
+              <button type="button" role="radio" aria-checked="false" data-color="black">Black</button>
+            </div>
+          </label>
+          <label>Workers <input type="number" id="explore-workers" min="1" max="16" value="2" title="Engine processes working in parallel"></label>
+          <label class="span2">Scope <span class="mono" id="explore-scope">whole book</span>
+            <button type="button" class="link" id="explore-scope-here">use position on board</button>
+            <button type="button" class="link" id="explore-scope-all">whole book</button>
+          </label>
+          <label>Depth <input type="number" id="explore-depth" min="6" max="30" value="14" title="Engine search depth per position"></label>
+          <label>Horizon (plies) <input type="number" id="explore-horizon" min="2" max="12" value="6" title="How far past the opening's position the lines are followed"></label>
+          <label>Replies per position <input type="number" id="explore-replies" min="1" max="5" value="3" title="How many opponent replies (within 60 cp of the best) must be answered"></label>
+          <label>Min games <input type="number" id="explore-min-games" min="0" value="0" title="Only openings reached by at least this many imported games"></label>
+          <div class="btn-row span2">
+            <button type="submit" class="btn primary" id="explore-queue">Queue</button>
+            <button type="button" class="btn" id="explore-start">Start workers</button>
+            <button type="button" class="btn" id="explore-stop">Stop</button>
+          </div>
+        </form>
+        <div class="deepen-progress" id="explore-progress"></div>
+        <ul class="job-list" id="explore-jobs"></ul>
+        <div class="panel-head">
+          <h2>Results</h2>
+          <div class="tree-controls">
+            <label>job <select id="explore-results-job"><option value="">all</option></select></label>
+            <label>sort <select id="explore-sort">
+              <option value="fit">fit</option>
+              <option value="decisions">least to learn</option>
+              <option value="eval">evaluation</option>
+              <option value="worst">worst case</option>
+              <option value="forgiveness">most forgiving</option>
+              <option value="reach">reach</option>
+              <option value="games">games</option>
+              <option value="theory">least theory</option>
+            </select></label>
+            <label class="toggle"><input type="checkbox" id="explore-sound" checked> sound only (eval ≥ −0.50)</label>
+          </div>
+        </div>
+        <p class="hint" id="explore-empty">No results yet. Queue a search and start the workers.</p>
+        <div class="table-scroll"><table class="explore-results" id="explore-results"></table></div>
+        <div class="btn-row"><button class="btn small" id="explore-more" hidden>show more</button></div>
+      </section>
+
+      <section class="panel" id="panel-games" hidden>
+        <div class="panel-head">
+          <h2>Your games</h2>
+          <span class="badge" id="games-total"></span>
+        </div>
+        <p class="hint" id="import-signin" hidden>Sign in with Google to import your own games. They stay private to your account; what you see below has been shared by this site.</p>
+        <form id="import-form" class="import-form">
+          <label class="btn file-pick"><input type="file" id="import-file" accept=".pgn,.txt,.gz,application/x-chess-pgn,text/plain">Choose PGN…</label>
+          <span class="hint" id="import-file-name">no file chosen</span>
+          <input type="text" id="import-player" placeholder="your name in the PGN (optional)" autocomplete="off" title="Results are then shown from this player's point of view">
+          <button type="submit" class="btn primary" id="import-start" disabled>Import</button>
+        </form>
+        <div class="import-progress" id="import-progress" hidden>
+          <div class="progress"><div id="import-bar"></div></div>
+          <div class="hint" id="import-status"></div>
+        </div>
+        <ul class="import-list" id="import-list"></ul>
+        <p class="hint" id="games-empty">Import a PGN file (your lichess or chess.com export, a tournament, a whole database; .gz is fine) to see which openings it contains, how they scored, and how often each book move was played. Drop the file here or choose it above.</p>
+        <div id="games-overview" hidden>
+          <div class="filter-row">
+            <label>Results for <select id="games-player"><option value="">both sides</option></select></label>
+            <div class="seg" id="games-color-seg" role="radiogroup" aria-label="Colour" hidden>
+              <button type="button" role="radio" aria-checked="true" data-color="">both colours</button>
+              <button type="button" role="radio" aria-checked="false" data-color="white">as White</button>
+              <button type="button" role="radio" aria-checked="false" data-color="black">as Black</button>
+            </div>
+          </div>
+          <div class="stat-row" id="games-tiles"></div>
+          <div class="panel-head">
+            <h2>Openings played</h2>
+            <div class="seg" id="games-by-seg" role="radiogroup" aria-label="Group by">
+              <button type="button" role="radio" aria-checked="true" data-by="family">family</button>
+              <button type="button" role="radio" aria-checked="false" data-by="opening">variation</button>
+              <button type="button" role="radio" aria-checked="false" data-by="eco">ECO</button>
+            </div>
+          </div>
+          <div class="legend" id="games-legend"></div>
+          <div class="opening-bars" id="opening-bars" role="table" aria-label="Openings by number of games, with the result split"></div>
+          <div class="hint">Each bar is the result split of that opening · the small blue mark is its share of the games · click a row to put the line on the board and list its games</div>
+          <div class="eco-map" id="games-eco-map" aria-label="ECO map of imported games"></div>
+          <div class="eco-legend"><span>ECO map: colour = share of games. Click a cell to list its games.</span></div>
+          <div class="panel-head">
+            <h2 id="games-list-title">Games at this position</h2>
+            <span class="badge" id="games-list-count"></span>
+            <button class="link" id="games-list-back" hidden>back to the position on the board</button>
+          </div>
+          <div class="hint" id="games-list-hint"></div>
+          <ol class="game-list" id="game-list"></ol>
+          <div class="btn-row"><button class="btn small" id="games-more" hidden>show more</button></div>
+        </div>
       </section>
 
       <section class="panel" id="panel-analysis-stats" hidden>
@@ -82,6 +198,7 @@
       <div class="position-head">
         <div class="opening-name" id="opening-name">Starting position</div>
         <div class="position-meta" id="position-meta"></div>
+        <div class="position-games" id="position-games"></div>
       </div>
       <div class="controls">
         <button class="btn icon" id="nav-start" title="Start (Home)" aria-label="Go to the starting position (Home)">⏮</button>
@@ -111,6 +228,18 @@
         </div>
         <div class="engine-lines" id="engine-lines"></div>
         <div class="engine-foot" id="engine-foot"></div>
+        <div class="deep" id="deep" hidden>
+          <div class="deep-head"><span>Deep analysis on dedicated machines</span><span class="badge" id="deep-badge"></span></div>
+          <div class="deep-controls">
+            <label>depth <input type="number" id="deep-depth" min="10" max="45" value="36" style="width:4em" title="Target depth for the search"></label>
+            <label>lines <input type="number" id="deep-multipv" min="1" max="5" value="3" style="width:3.5em"></label>
+            <button class="btn small primary" id="deep-queue" title="Queue this position for your machines; starts one if you have none running">analyse this position</button>
+            <button class="btn small" id="deep-start" title="Start another machine to work through your queue">+ machine</button>
+          </div>
+          <div class="hint" id="deep-hint"></div>
+          <ul class="deep-list" id="deep-requests"></ul>
+          <ul class="deep-list" id="deep-machines"></ul>
+        </div>
       </section>
 
       <section class="panel" id="panel-book">
@@ -140,6 +269,7 @@
           <h2>Server deepening</h2>
           <span class="badge" id="deepen-state">stopped</span>
         </div>
+        <p class="hint admin-note" id="deepen-admin-note" hidden>Only the admins of this site can run the server engine. The engine in your browser still analyses whatever you look at, and signed-in users can save its results.</p>
         <form id="deepen-form" class="form-grid">
           <label>Target depth <input type="number" id="deepen-depth" min="1" max="60" value="20"></label>
           <label>Lines (MultiPV) <input type="number" id="deepen-multipv" min="1" max="10" value="3"></label>
@@ -183,6 +313,7 @@
         <span class="swatch ring shallow"></span> depth &lt; 15
         <span class="swatch ring deep"></span> depth ≥ 15
         <span class="sep"></span> bold = named opening · click a node to go there · ⊕ expands
+        <span class="sep"></span><span id="tree-games-legend" hidden>edge width = share of your games · number = games through the node</span>
       </div>
       <div class="tooltip" id="tooltip" hidden></div>
     </section>

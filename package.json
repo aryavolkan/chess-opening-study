@@ -12,11 +12,13 @@
     "dev": "node --disable-warning=ExperimentalWarning --watch server/index.js",
     "deepen": "node --disable-warning=ExperimentalWarning scripts/deepen.js",
     "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js",
-    "fetch-openings": "node scripts/fetch-openings.js"
+    "fetch-openings": "node scripts/fetch-openings.js",
+    "import-pgn": "node --disable-warning=ExperimentalWarning scripts/import-pgn.js"
   },
   "dependencies": {
     "@lichess-org/chessground": "^10.2.0",
     "chess.js": "^1.4.0",
+    "chessops": "^0.15.1",
     "stockfish": "^19.0.0"
   },
   "license": "MIT"

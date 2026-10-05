@@ -20,6 +20,8 @@ const NS = 'http://www.w3.org/2000/svg';
  * @param {number} o.depth      plies shown below the root by default
  * @param {Set<object>} o.expanded  nodes expanded past the default depth
  * @param {Map<string, object>} o.analysis  epd -> stored analysis record
+ * @param {Map<string, object>} [o.games]  epd -> imported-game counts; edges are
+ *   drawn thicker the more games went through them (relative to the root)
  * @param {(node) => void} o.onSelect
  * @param {(node) => void} o.onToggle
  * @param {(event, node|null) => void} o.onHover
@@ -73,6 +75,9 @@ export function renderTree(svg, o) {
 
   const x = (col) => PAD_X + col * COL_W + 20;
   const y = (row) => PAD_Y + row * ROW_H + ROW_H / 2;
+  const games = o.games || null;
+  const gamesOf = (node) => (games && node.epd ? games.get(node.epd)?.games || 0 : 0);
+  const rootGames = games ? gamesOf(root) : 0;
 
   // edges first so nodes draw on top
   for (const [node, pos] of visible) {
@@ -84,11 +89,16 @@ export function renderTree(svg, o) {
     const x2 = x(pos.col) - R;
     const y2 = y(pos.row);
     const mx = (x1 + x2) / 2;
-    const path = el('path', {
-      class: 'edge' + (onPath.has(node) && onPath.has(node.parent) ? ' onpath' : ''),
-      d: `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`,
-    });
-    svg.appendChild(path);
+    const cls = ['edge'];
+    if (onPath.has(node) && onPath.has(node.parent)) cls.push('onpath');
+    const attrs = { d: `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}` };
+    if (rootGames) {
+      const n = gamesOf(node);
+      cls.push(n ? 'flow' : 'noflow');
+      if (n) attrs['stroke-width'] = (1.5 + 8 * Math.sqrt(n / rootGames)).toFixed(1);
+    }
+    attrs.class = cls.join(' ');
+    svg.appendChild(el('path', attrs));
   }
 
   for (const [node, pos] of visible) {
@@ -102,14 +112,24 @@ export function renderTree(svg, o) {
     const san = el('text', { class: 'san', x: R + 5, y: 4 });
     san.textContent = node.san ? moveLabel(node) : 'start';
     g.appendChild(san);
+    let cx = R + 5 + textWidth(san.textContent) + 6;
+    if (games) {
+      const n = gamesOf(node);
+      if (n) {
+        const count = el('text', { class: 'games', x: cx, y: 4 });
+        count.textContent = `${n}`;
+        g.appendChild(count);
+        cx += textWidth(count.textContent) + 6;
+      }
+    }
     const hidden = !pos.open && node.children.size > 0;
     if (hidden) {
-      const more = el('text', { class: 'more', x: R + 5 + textWidth(san.textContent) + 6, y: 4 });
+      const more = el('text', { class: 'more', x: cx, y: 4 });
       more.textContent = `⊕${countHidden(node)}`;
       more.addEventListener('click', (e) => { e.stopPropagation(); o.onToggle(node); });
       g.appendChild(more);
     } else if (pos.open && node !== root && expanded.has(node)) {
-      const less = el('text', { class: 'more', x: R + 5 + textWidth(san.textContent) + 6, y: 4 });
+      const less = el('text', { class: 'more', x: cx, y: 4 });
       less.textContent = '⊖';
       less.addEventListener('click', (e) => { e.stopPropagation(); o.onToggle(node); });
       g.appendChild(less);
