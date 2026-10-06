@@ -71,21 +71,13 @@ its games and its opening name. Games are deduplicated across imports, and
 each import can be removed again. Positions are indexed for the first 20
 moves (configurable); the full game is kept so it can be put on the board.
 
-**Dedicated analysis machines.** Under the engine lines, "analyse this
-position" queues the position on the board for your own machines: engines
-that work through your queue of positions at the depth you ask for (up to
-45 by default), reporting the depth as it grows and storing every result
-in the shared analysis store, so the whole app, and everyone else, gets
-the depth. Each machine is a worker process on the app's host that stops
-by itself when it has been idle for a few minutes or has run for its
-lifetime. Every signed-in user can start machines, within limits the site
-sets (per person, in all, CPUs each, lifetime), and stop them again.
-
 **Public contributor workers.** On the Analysis tab, anyone can get a token
 and run `server/public-worker.js` on their own computer. The worker connects
 to the app, pulls the shallowest book positions, analyses them with its own
 Stockfish, and pushes the results back into the shared store. No account is
-needed; the worker stops itself when idle or after its lifetime.
+needed; the worker stops itself when idle or after its lifetime. The site
+never starts analysis workers of its own: more engine power comes from more
+people running this worker.
 
 **Opening explorer.** On the Study tab, queue a search for openings worth
 playing: pick a colour, a scope (the whole book or everything under the
@@ -138,14 +130,6 @@ Environment variables:
 | `EXPLORE` | unset | `1` starts the opening explorer's queued jobs on boot (they also resume by themselves if they were running) |
 | `LOG_EXPLORE` | unset | `1` logs every opening the explorer scores |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `BASE_URL`, `ADMIN_EMAILS` | unset | turn on Sign in with Google and accounts; see "Publishing it as a public site" |
-| `MACHINES` | unset | `off` disables dedicated machines; otherwise each machine is a worker process on the app's host |
-| `MACHINES_PER_USER`, `MACHINES_TOTAL` | `2`, `8` | how many machines one person, and the whole site, may run at once |
-| `MACHINE_CPUS` | `2` | engines per machine (one per CPU core) |
-| `MACHINE_MAX_MINUTES`, `MACHINE_IDLE_SECONDS` | `120`, `180` | a machine stops after this lifetime, or this long without work |
-| `MACHINE_MAX_DEPTH` | `45` | deepest request a user may make |
-| `MACHINE_STOCKFISH_FLAVOR` | `STOCKFISH_FLAVOR` | engine build on machines; `single` or `full` are the stronger nets |
-| `MACHINE_USERS` | `all` | `admins` restricts starting machines to admins |
-| `LOG_MACHINES` | unset | `1` logs every request a machine finishes |
 
 Headless deepening without the web server, for example on a machine that is
 left running overnight (it shares the database with the server):
@@ -247,11 +231,6 @@ proxy that terminates HTTPS. With Caddy, for example, `study.example.com { rever
 localhost:3000 }` is the whole configuration. With Docker Compose, add the
 variables to the `environment` block of `docker-compose.yml`.
 
-Dedicated analysis machines are worker processes on that same host, so
-`MACHINES_PER_USER`, `MACHINES_TOTAL` and `MACHINE_CPUS` bound how much of
-its CPU signed-in users can take at once. `MACHINE_USERS=admins` keeps them
-to the admins, and `MACHINES=off` turns them off.
-
 ## Deploying without sign-in
 
 The app is one Node process plus a SQLite file, so it needs a single machine
@@ -302,15 +281,13 @@ server/engine.js       Stockfish in Node with analyse(fen, {depth, multipv})
 server/deepener.js     background queue that raises stored depth
 server/engine-pool.js  pool of engine worker processes (engine-worker.js) with a request queue
 server/explorer.js     opening explorer: job queue, repertoire walk, scoring
-server/machines.js     dedicated analysis machines: per-user queue, limits, worker protocol
-server/machine-backends.js  where machines run: worker processes on the app's host
-server/remote-worker.js the worker a machine runs: pull, analyse, report, exit when idle
+server/public-worker-pool.js  contributor workers: tokens, shallow positions out, results in
+server/public-worker.js the worker contributors run on their own computers
 server/auth.js         Sign in with Google (OpenID Connect), sessions, access checks
 server/app.js          static files + sign-in routes + JSON API with access levels
 public/                the page: board (chessground), engine worker, tree, drill
 public/games.js        Games tab: import, opening chart, ECO frequency map, game list
 public/explorer.js     Study tab: explorer jobs, workers and the results table
-public/deep.js         Engine panel: queue positions for dedicated machines, start and stop them
 public/theme.js        Auto / Light / Dark preference, applied before first paint
 public/prefs.js        per-browser preferences in localStorage
 Dockerfile             image used by docker-compose.yml and the publish workflow
@@ -342,9 +319,8 @@ Dockerfile             image used by docker-compose.yml and the publish workflow
 | GET | `/api/explore/results?job=` | scored openings, best fit first |
 | GET | `/auth/me` | `{mode, user, admin}`; `/auth/google` starts sign-in, `/auth/google/callback` finishes it, `POST /auth/logout` ends the session |
 | POST | `/api/games/imports/:id/share` | `{shared}`: make an import visible to everyone (admins) |
-| GET/POST/DELETE | `/api/machines`, `/api/machines/:id` | the viewer's machines and queue with the site's limits; start one; stop one |
-| POST/DELETE | `/api/machines/requests`, `/api/machines/requests/:id` | queue `{epd, depth, multipv, label}` for the viewer's machines; cancel |
-| POST | `/api/machines/worker/next`, `/progress`, `/result`, `/bye` | what a machine calls, with the bearer token it was started with |
+| GET/POST | `/api/public-workers`, `/api/public-workers/join` | contributor worker counts; get a worker token |
+| POST | `/api/public-workers/worker/next`, `/progress`, `/result`, `/bye` | what a contributor worker calls, with its bearer token |
 
 With sign-in on, routes that change per-user data need a session (401
 otherwise), the engine routes need an admin (403), and `/api/games/imports`

@@ -6,8 +6,6 @@ import { loadOpenings } from './openings.js';
 import { Deepener } from './deepener.js';
 import { Explorer } from './explorer.js';
 import { createAuth, authConfigFromEnv } from './auth.js';
-import { Machines, machinesConfigFromEnv } from './machines.js';
-import { backendFromEnv } from './machine-backends.js';
 import { PublicWorkerPool } from './public-worker-pool.js';
 import { createApp } from './app.js';
 
@@ -35,19 +33,12 @@ explorer.on('result', (r) => {
 explorer.on('error', (err) => console.error('[explore] error:', err));
 explorer.on('idle', () => console.log('[explore] queue empty, workers stopped'));
 
-// Dedicated analysis machines: worker processes on this host (MACHINES=off turns them off).
-const machines = new Machines({ store, backend: backendFromEnv(process.env), config: machinesConfigFromEnv(process.env, PORT) });
-machines.on('error', (err) => console.error('[machines] error:', err));
-machines.on('machine', (e) => console.log(`[machines] ${e.event}: ${e.machine.name} (${e.machine.backend}, ${e.machine.cpus} cpu, user ${e.machine.userId}${e.requeued ? `, ${e.requeued} requests requeued` : ''})`));
-machines.on('request', (e) => { if (process.env.LOG_MACHINES) console.log(`[machines] request #${e.request.id} ${e.event} at depth ${e.request.progress}`); });
-machines.startHousekeeping();
-
 // Public contributor workers: anyone can run a worker and help deepen the book.
 const publicWorkers = new PublicWorkerPool({ store, deepener });
 publicWorkers.on('result', (r) => { if (process.env.LOG_PUBLIC_WORKERS) console.log(`[public-worker] ${r.worker}: ${r.epd} depth ${r.depth}${r.stored ? ' stored' : ''}`); });
 publicWorkers.on('error', (err) => console.error('[public-worker] error:', err));
 
-const app = createApp({ store, book, deepener, explorer, machines, publicWorkers, auth, log: (level, err) => console.error(err) });
+const app = createApp({ store, book, deepener, explorer, publicWorkers, auth, log: (level, err) => console.error(err) });
 const server = createServer(app);
 server.listen(PORT, HOST, () => {
   console.log(`Opening study: http://${HOST}:${PORT}  (${book.openings.length} openings, ${book.positions.length} book nodes, loaded in ${Date.now() - t0} ms)`);
@@ -57,12 +48,6 @@ server.listen(PORT, HOST, () => {
     console.log(`Sign in with Google: on, public origin ${auth.config.baseUrl}, ${admins} admin${admins === 1 ? '' : 's'}${admins ? '' : ' (set ADMIN_EMAILS to run the server engines)'}`);
   } else {
     console.log('Sign in with Google: off (single local user; set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and BASE_URL to publish the site)');
-  }
-  if (machines.enabled) {
-    const c = machines.config;
-    console.log(`Dedicated machines: ${machines.backend.kind} backend, ${c.cpus} cpu each, up to ${c.perUser} per user and ${c.total} in all, ${c.maxMinutes} min lifetime, workers reach the app at ${c.workerApiUrl}`);
-  } else {
-    console.log('Dedicated machines: off');
   }
   if (explorer.autoResume || process.env.EXPLORE === '1') {
     explorer.start().then((s) => console.log(`[explore] resumed with ${s.workers} workers, ${s.jobs.filter((j) => j.status !== 'done').length} jobs queued`))
@@ -76,7 +61,7 @@ server.listen(PORT, HOST, () => {
 
 function shutdown() {
   console.log('shutting down');
-  Promise.allSettled([deepener.stop(), explorer.stop(), machines.shutdown(), publicWorkers.shutdown()]).finally(() => {
+  Promise.allSettled([deepener.stop(), explorer.stop(), publicWorkers.shutdown()]).finally(() => {
     server.close();
     store.close();
     process.exit(0);

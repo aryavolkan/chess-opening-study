@@ -51,7 +51,7 @@ function vendorRoots() {
 
 const MAX_BODY = 2 * 1024 * 1024;
 
-export function createApp({ store, book, deepener, explorer = null, machines = null, publicWorkers = null, importer = new Importer({ store, book }), auth = createAuth({ store }), log = () => {} }) {
+export function createApp({ store, book, deepener, explorer = null, publicWorkers = null, importer = new Importer({ store, book }), auth = createAuth({ store }), log = () => {} }) {
   const vendors = vendorRoots();
   const openingsPayload = JSON.stringify({
     count: book.openings.length,
@@ -70,7 +70,6 @@ export function createApp({ store, book, deepener, explorer = null, machines = n
   const PUBLIC = { access: 'public' };
   const USER = { access: 'user' };
   const ADMIN = { access: 'admin' };
-  const WORKER = { access: 'worker' }; // a dedicated machine, by its bearer token
   const PUBLIC_WORKER = { access: 'public-worker' }; // a global contributor worker, by its bearer token
 
   const routes = [
@@ -172,9 +171,6 @@ export function createApp({ store, book, deepener, explorer = null, machines = n
       if (e?.running && e.pool?.working) {
         for (const w of e.pool.working) workers.push({ source: 'explorer', epd: epdOf(w.fen), depth: w.depth });
       }
-      if (machines?.enabled) {
-        for (const w of machines.workers()) workers.push({ source: w.source, epd: w.epd, depth: w.depth, progress: w.progress });
-      }
       return { workers, at: new Date().toISOString() };
     }, PUBLIC],
 
@@ -258,17 +254,6 @@ export function createApp({ store, book, deepener, explorer = null, machines = n
       return { results: store.exploreResults({ jobId, limit: req.query.get('limit') || 5000 }) };
     }, PUBLIC],
 
-    // ---- dedicated analysis machines ----
-    ['GET', /^\/api\/machines$/, (req) => needMachines().status(req.user, req.scope), PUBLIC],
-    ['POST', /^\/api\/machines$/, async (req) => ({ machine: await needMachines().create(req.user, req.body || {}) }), USER],
-    ['DELETE', /^\/api\/machines\/(\d+)$/, async (req, res, m) => ({ machine: await needMachines().stop(req.user, Number(m[1])) }), USER],
-    ['POST', /^\/api\/machines\/requests$/, (req) => needMachines().request(req.user, req.body || {}), USER],
-    ['DELETE', /^\/api\/machines\/requests\/(\d+)$/, (req, res, m) => needMachines().cancel(req.user, Number(m[1])), USER],
-    ['POST', /^\/api\/machines\/worker\/next$/, (req) => needMachines().workerNext(req.machine, req.body || {}), WORKER],
-    ['POST', /^\/api\/machines\/worker\/progress$/, (req) => needMachines().workerProgress(req.machine, req.body || {}), WORKER],
-    ['POST', /^\/api\/machines\/worker\/result$/, (req) => needMachines().workerResult(req.machine, req.body || {}), WORKER],
-    ['POST', /^\/api\/machines\/worker\/bye$/, (req) => needMachines().workerBye(req.machine), WORKER],
-
     // ---- public contributor workers ----
     ['GET', /^\/api\/public-workers$/, (req) => {
       if (!publicWorkers) throw httpError(503, 'public workers are not enabled');
@@ -305,11 +290,6 @@ export function createApp({ store, book, deepener, explorer = null, machines = n
     return explorer;
   }
 
-  function needMachines() {
-    if (!machines) throw httpError(503, 'dedicated machines are not available on this server');
-    return machines;
-  }
-
   /** player / color / import filter from a query or body object, plus the request's visibility scope. */
   function gamesFilter(o, req) {
     const filter = { scope: req.scope };
@@ -334,12 +314,8 @@ export function createApp({ store, book, deepener, explorer = null, machines = n
         for (const [method, re, fn, opts = {}] of routes) {
           const m = re.exec(path);
           if (!m || method !== req.method) continue;
-          if (opts.access === 'worker') {
-            // Machines authenticate with the token they were started with, not a session
-            const token = /^Bearer\s+(\S+)$/.exec(req.headers.authorization || '')?.[1];
-            req.machine = needMachines().machineForToken(token);
-            if (!req.machine) throw httpError(401, 'unknown or stopped machine');
-          } else if (opts.access === 'public-worker') {
+          if (opts.access === 'public-worker') {
+            // Contributor workers authenticate with the token they joined with, not a session
             const token = /^Bearer\s+(\S+)$/.exec(req.headers.authorization || '')?.[1];
             if (!publicWorkers) throw httpError(503, 'public workers are not enabled');
             req.publicWorker = publicWorkers.workerForToken(token);

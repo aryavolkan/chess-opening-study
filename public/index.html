@@ -236,18 +236,6 @@
         </div>
         <div class="engine-lines" id="engine-lines"></div>
         <div class="engine-foot" id="engine-foot"></div>
-        <div class="deep" id="deep" hidden>
-          <div class="deep-head"><span>Deep analysis on dedicated machines</span><span class="badge" id="deep-badge"></span></div>
-          <div class="deep-controls">
-            <label>depth <input type="number" id="deep-depth" min="10" max="45" value="36" style="width:4em" title="Target depth for the search"></label>
-            <label>lines <input type="number" id="deep-multipv" min="1" max="5" value="3" style="width:3.5em"></label>
-            <button class="btn small primary" id="deep-queue" title="Queue this position for your machines; starts one if you have none running">analyse this position</button>
-            <button class="btn small" id="deep-start" title="Start another machine to work through your queue">+ machine</button>
-          </div>
-          <div class="hint" id="deep-hint"></div>
-          <ul class="deep-list" id="deep-requests"></ul>
-          <ul class="deep-list" id="deep-machines"></ul>
-        </div>
       </section>
 
       <section class="panel" id="panel-book">
@@ -338,7 +326,6 @@
         <span class="sep"></span>
         <span class="swatch" style="background:var(--accent)"></span> deepener
         <span class="swatch" style="background:var(--good)"></span> explorer
-        <span class="swatch" style="background:var(--accent-2)"></span> machine
         <span class="swatch" style="background:var(--warn)"></span> browser
         <span class="sep"></span> bold = named opening · click a node to go there · ⊕ expands
         <span class="sep"></span><span id="tree-games-legend" hidden>edge width = share of your games · number = games through the node</span>
