@@ -76,17 +76,16 @@ position" queues the position on the board for your own machines: engines
 that work through your queue of positions at the depth you ask for (up to
 45 by default), reporting the depth as it grows and storing every result
 in the shared analysis store, so the whole app, and everyone else, gets
-the depth. On Fly.io each machine is a Fly Machine started from the app's
-own image and destroyed when it has been idle for a few minutes or has run
-for its lifetime; anywhere else each machine is a worker process on the
-app's host. Every signed-in user can start machines, within limits the site
+the depth. Each machine is a worker process on the app's host that stops
+by itself when it has been idle for a few minutes or has run for its
+lifetime. Every signed-in user can start machines, within limits the site
 sets (per person, in all, CPUs each, lifetime), and stop them again.
 
 **Public contributor workers.** On the Analysis tab, anyone can get a token
 and run `server/public-worker.js` on their own computer. The worker connects
 to the app, pulls the shallowest book positions, analyses them with its own
-Stockfish, and pushes the results back into the shared store. No account or
-Fly access is needed; the worker stops itself when idle or after its lifetime.
+Stockfish, and pushes the results back into the shared store. No account is
+needed; the worker stops itself when idle or after its lifetime.
 
 **Opening explorer.** On the Study tab, queue a search for openings worth
 playing: pick a colour, a scope (the whole book or everything under the
@@ -139,10 +138,9 @@ Environment variables:
 | `EXPLORE` | unset | `1` starts the opening explorer's queued jobs on boot (they also resume by themselves if they were running) |
 | `LOG_EXPLORE` | unset | `1` logs every opening the explorer scores |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `BASE_URL`, `ADMIN_EMAILS` | unset | turn on Sign in with Google and accounts; see "Publishing it as a public site" |
-| `FLY_API_TOKEN` | unset | on Fly: lets the app start dedicated machines through the Machines API (a deploy token) |
-| `MACHINES` | unset | `off` disables dedicated machines; otherwise local worker processes, or Fly Machines when `FLY_API_TOKEN` is set on Fly |
+| `MACHINES` | unset | `off` disables dedicated machines; otherwise each machine is a worker process on the app's host |
 | `MACHINES_PER_USER`, `MACHINES_TOTAL` | `2`, `8` | how many machines one person, and the whole site, may run at once |
-| `MACHINE_CPUS`, `MACHINE_MEMORY_MB` | `2`, `1024` | size of a machine (one engine per CPU) |
+| `MACHINE_CPUS` | `2` | engines per machine (one per CPU core) |
 | `MACHINE_MAX_MINUTES`, `MACHINE_IDLE_SECONDS` | `120`, `180` | a machine stops after this lifetime, or this long without work |
 | `MACHINE_MAX_DEPTH` | `45` | deepest request a user may make |
 | `MACHINE_STOCKFISH_FLAVOR` | `STOCKFISH_FLAVOR` | engine build on machines; `single` or `full` are the stronger nets |
@@ -242,52 +240,17 @@ database from before sign-in is migrated in place: its study set, imports
 and games belong to the local user, which admins also own, so an admin can
 share the imports made before the site went public.
 
-**3. Deploy.** `scripts/fly-setup.sh` does the whole of this step the way
-[Fly's agent guide](https://fly.io/agent-ready.md) describes: it installs
-`flyctl` if needed, signs in (with `FLY_API_TOKEN` from the environment, or
-by printing a login URL to approve), creates the app from `fly.toml` if it
-does not exist, adds the volume, sets the secrets it finds in the
-environment (the Google variables, the machine limits) plus a deploy token
-for the analysis machines, deploys, and prints the URL. It refuses to
-deploy a public URL without the Google variables unless told `--open`.
+**3. Deploy.** Any host with a persistent disk will do. Run the container
+image (see "Deploying without sign-in" below), or `npm start` with Node
+22.5+ and `DB_PATH` on the disk, with the variables above, behind a reverse
+proxy that terminates HTTPS. With Caddy, for example, `study.example.com { reverse_proxy
+localhost:3000 }` is the whole configuration. With Docker Compose, add the
+variables to the `environment` block of `docker-compose.yml`.
 
-```sh
-export GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... ADMIN_EMAILS=you@example.com
-scripts/fly-setup.sh                 # or: --app other-name --region fra
-```
-
-By hand, `fly.toml` describes one always-on machine with a 1 GB volume,
-`HOST`, `PORT`, `DB_PATH` and `BASE_URL` set (change `BASE_URL` to your
-app's hostname or custom domain). `flyctl` is installed with
-`curl -L https://fly.io/install.sh | sh`; it authenticates with
-`fly auth login`, or non-interactively with a token in `FLY_API_TOKEN`.
-
-```sh
-fly launch --copy-config --no-deploy        # creates the app; keep the fly.toml in the repo
-fly volumes create study_data --size 1
-fly secrets set GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... ADMIN_EMAILS=you@example.com
-fly secrets set FLY_API_TOKEN="$(fly tokens create deploy -x 999999h)"   # lets the app start analysis machines
-fly deploy
-```
-
-The last secret is what makes **dedicated analysis machines** work on Fly:
-with it, every "analyse this position" starts a Fly Machine from the same
-image (shared CPUs, `MACHINE_CPUS` engines, `MACHINE_MEMORY_MB`), which
-reaches the app over the private network at `app.process.<app>.internal`,
-and is destroyed when idle or at the end of its lifetime, so it only costs
-while it works. Keep `MACHINES_PER_USER` and `MACHINES_TOTAL` in mind: they
-bound what the site can spend at once.
-
-After that, every push to `main` that passes the tests deploys by itself
-through `.github/workflows/deploy.yml`, once two repository settings exist:
-the variable `FLY_APP` (the app name) and the secret `FLY_API_TOKEN` (from
-`fly tokens create deploy`). Without them the workflow does nothing.
-
-Any other host works the same way: run the container (or `npm start` with
-Node 22.5+) behind a reverse proxy that terminates HTTPS, with the
-variables above. With Caddy, for example, `study.example.com { reverse_proxy
-localhost:3000 }` is the whole configuration, and the Docker Compose file
-in the repository takes the same environment variables.
+Dedicated analysis machines are worker processes on that same host, so
+`MACHINES_PER_USER`, `MACHINES_TOTAL` and `MACHINE_CPUS` bound how much of
+its CPU signed-in users can take at once. `MACHINE_USERS=admins` keeps them
+to the admins, and `MACHINES=off` turns them off.
 
 ## Deploying without sign-in
 
@@ -320,10 +283,6 @@ engine running, `STOCKFISH_FLAVOR=full` for the stronger nets). While the
 repository is private, pulling needs `docker login ghcr.io` with a token that
 has `read:packages`.
 
-**Fly.io.** `fly.toml` describes one always-on machine (so the deepener keeps
-running) with a 1 GB volume and a health check; see "Publishing it as a
-public site" above for the commands.
-
 **Anything else.** Any host with Node 22.5+ or a container runtime and a
 persistent disk works: set `HOST=0.0.0.0` and point `DB_PATH` at the disk.
 
@@ -339,13 +298,12 @@ server/openings.js     loads the book, computes the position of every node
 server/db.js           SQLite: analysis, study_lines, settings, imports, games, game_positions
 server/games.js        PGN import: replay with chessops, classify by book position, index positions
 scripts/import-pgn.js  the same import from the command line
-scripts/fly-setup.sh   create, configure and deploy the app on Fly.io
 server/engine.js       Stockfish in Node with analyse(fen, {depth, multipv})
 server/deepener.js     background queue that raises stored depth
 server/engine-pool.js  pool of engine worker processes (engine-worker.js) with a request queue
 server/explorer.js     opening explorer: job queue, repertoire walk, scoring
 server/machines.js     dedicated analysis machines: per-user queue, limits, worker protocol
-server/machine-backends.js  Fly Machines API client, or local worker processes
+server/machine-backends.js  where machines run: worker processes on the app's host
 server/remote-worker.js the worker a machine runs: pull, analyse, report, exit when idle
 server/auth.js         Sign in with Google (OpenID Connect), sessions, access checks
 server/app.js          static files + sign-in routes + JSON API with access levels
@@ -355,7 +313,7 @@ public/explorer.js     Study tab: explorer jobs, workers and the results table
 public/deep.js         Engine panel: queue positions for dedicated machines, start and stop them
 public/theme.js        Auto / Light / Dark preference, applied before first paint
 public/prefs.js        per-browser preferences in localStorage
-Dockerfile             image used by docker-compose.yml, fly.toml and the publish workflow
+Dockerfile             image used by docker-compose.yml and the publish workflow
 ```
 
 ### API

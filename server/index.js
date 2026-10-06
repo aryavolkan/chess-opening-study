@@ -35,8 +35,8 @@ explorer.on('result', (r) => {
 explorer.on('error', (err) => console.error('[explore] error:', err));
 explorer.on('idle', () => console.log('[explore] queue empty, workers stopped'));
 
-// Dedicated analysis machines: Fly Machines when the app runs on Fly with a token, local processes otherwise.
-const machines = new Machines({ store, backend: backendFromEnv(process.env, PORT), config: machinesConfigFromEnv(process.env, PORT) });
+// Dedicated analysis machines: worker processes on this host (MACHINES=off turns them off).
+const machines = new Machines({ store, backend: backendFromEnv(process.env), config: machinesConfigFromEnv(process.env, PORT) });
 machines.on('error', (err) => console.error('[machines] error:', err));
 machines.on('machine', (e) => console.log(`[machines] ${e.event}: ${e.machine.name} (${e.machine.backend}, ${e.machine.cpus} cpu, user ${e.machine.userId}${e.requeued ? `, ${e.requeued} requests requeued` : ''})`));
 machines.on('request', (e) => { if (process.env.LOG_MACHINES) console.log(`[machines] request #${e.request.id} ${e.event} at depth ${e.request.progress}`); });

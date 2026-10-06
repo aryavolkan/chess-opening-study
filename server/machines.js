@@ -1,12 +1,11 @@
 // Dedicated analysis machines: every user can start machines that work
 // through that user's queue of positions to analyse in depth. Machines are
-// Fly Machines created from the app's own image (on Fly, with a token) or
-// local worker processes (anywhere else); see machine-backends.js. Results
-// go into the shared analysis store, so everyone benefits from the depth.
+// worker processes on the app's host; see machine-backends.js. Results go
+// into the shared analysis store, so everyone benefits from the depth.
 //
 // Limits (environment): MACHINES_PER_USER, MACHINES_TOTAL, MACHINE_CPUS,
-// MACHINE_MEMORY_MB, MACHINE_MAX_MINUTES, MACHINE_IDLE_SECONDS,
-// MACHINE_MAX_DEPTH, MACHINE_STOCKFISH_FLAVOR, MACHINE_USERS (all | admins).
+// MACHINE_MAX_MINUTES, MACHINE_IDLE_SECONDS, MACHINE_MAX_DEPTH,
+// MACHINE_STOCKFISH_FLAVOR, MACHINE_USERS (all | admins).
 
 import { createHash, randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
@@ -20,7 +19,6 @@ export function machinesConfigFromEnv(env = process.env, port = 3000) {
     perUser: int(env.MACHINES_PER_USER, 2, 0, 50),
     total: int(env.MACHINES_TOTAL, 8, 0, 500),
     cpus: int(env.MACHINE_CPUS, 2, 1, 16),
-    memoryMb: int(env.MACHINE_MEMORY_MB, 1024, 256, 65536),
     maxMinutes: int(env.MACHINE_MAX_MINUTES, 120, 1, 1440),
     idleSeconds: int(env.MACHINE_IDLE_SECONDS, 180, 10, 86400),
     maxDepth: int(env.MACHINE_MAX_DEPTH, 45, 10, 99),
@@ -51,7 +49,8 @@ export class Machines extends EventEmitter {
         if (m) this.markStopped(m, code ? `worker exited with code ${code}` : null);
       });
     }
-    // Machines from a previous run of the app are gone (local) or unknown (Fly): check them
+    // Machines of a backend this server no longer runs (or of any, with machines off) are gone;
+    // local ones from a previous run are found gone by housekeeping
     for (const m of this.store.activeMachines()) {
       if (!backend || backend.kind !== m.backend) this.markStopped(m, 'the app restarted');
     }
@@ -136,7 +135,6 @@ export class Machines extends EventEmitter {
       const { remoteId } = await this.backend.create({
         name: row.name,
         cpus: n,
-        memoryMb: this.config.memoryMb,
         env: {
           WORKER_API_URL: this.config.workerApiUrl,
           WORKER_TOKEN: token,

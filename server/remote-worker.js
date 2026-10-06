@@ -1,9 +1,9 @@
 // A dedicated analysis machine: pulls positions from the app's queue for
 // the user who started it, analyses them with one engine per CPU, reports
 // progress and results, and exits when the queue has been empty for a
-// while or its lifetime is over. Runs as a Fly Machine (FlyBackend) or a
-// local process (LocalBackend); in both cases it only needs HTTP access to
-// the app and the token it was started with.
+// while or its lifetime is over. The app starts it as a child process
+// (LocalBackend); it only needs HTTP access to the app and the token it was
+// started with.
 //
 // Environment: WORKER_API_URL, WORKER_TOKEN, WORKER_CPUS, WORKER_IDLE_SECONDS,
 // WORKER_MAX_MINUTES, STOCKFISH_FLAVOR.

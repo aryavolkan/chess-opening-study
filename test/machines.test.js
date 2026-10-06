@@ -6,7 +6,7 @@ import { openDb, LOCAL_USER_ID } from '../server/db.js';
 import { loadOpenings } from '../server/openings.js';
 import { createApp } from '../server/app.js';
 import { Machines, machinesConfigFromEnv } from '../server/machines.js';
-import { FlyBackend, LocalBackend, backendFromEnv, workerApiUrlFromEnv } from '../server/machine-backends.js';
+import { LocalBackend, backendFromEnv, workerApiUrlFromEnv } from '../server/machine-backends.js';
 
 const START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -';
 const E4 = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq -';
@@ -159,51 +159,23 @@ test('machines: limits, queue, worker protocol, stop and housekeeping', async ()
   store.close();
 });
 
-test('backends: Fly Machines API client against a fake API, and the local process backend', async () => {
-  const calls = [];
-  const fake = createServer((req, res) => {
-    let body = '';
-    req.on('data', (c) => { body += c; });
-    req.on('end', () => {
-      calls.push({ method: req.method, url: req.url, auth: req.headers.authorization, body: body ? JSON.parse(body) : null });
-      const json = (status, obj) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
-      if (req.method === 'POST' && req.url === '/v1/apps/study/machines') return json(200, { id: 'd8dd9ee2f', state: 'created' });
-      if (req.method === 'GET' && req.url === '/v1/apps/study/machines/d8dd9ee2f') return json(200, { id: 'd8dd9ee2f', state: 'started' });
-      if (req.method === 'GET' && req.url === '/v1/apps/study/machines/gone') return json(404, { error: 'machine not found' });
-      if (req.method === 'POST' && req.url === '/v1/apps/study/machines/d8dd9ee2f/stop') return json(200, { ok: true });
-      if (req.method === 'DELETE' && req.url === '/v1/apps/study/machines/d8dd9ee2f?force=true') return json(200, { ok: true });
-      if (req.method === 'POST' && req.url === '/v1/apps/study/machines/gone/stop') return json(404, { error: 'machine not found' });
-      if (req.method === 'DELETE' && req.url === '/v1/apps/study/machines/gone?force=true') return json(404, { error: 'machine not found' });
-      json(500, { error: 'unexpected' });
-    });
-  });
-  await new Promise((r) => fake.listen(0, '127.0.0.1', r));
-  const apiUrl = `http://127.0.0.1:${fake.address().port}`;
-  try {
-    const fly = new FlyBackend({ token: 'tok', app: 'study', image: 'registry.fly.io/study:deployment-1', region: 'ams', apiUrl });
-    const created = await fly.create({ name: 'engine-u1-abc', cpus: 2, memoryMb: 1024, env: { WORKER_TOKEN: 't', WORKER_CPUS: 2 } });
-    assert.deepEqual(created, { remoteId: 'd8dd9ee2f', state: 'created' });
-    const c = calls[0];
-    assert.equal(c.auth, 'Bearer tok');
-    assert.equal(c.body.name, 'engine-u1-abc');
-    assert.equal(c.body.region, 'ams');
-    assert.equal(c.body.config.image, 'registry.fly.io/study:deployment-1');
-    assert.deepEqual(c.body.config.env, { WORKER_TOKEN: 't', WORKER_CPUS: '2' }, 'env values are strings');
-    assert.deepEqual(c.body.config.guest, { cpu_kind: 'shared', cpus: 2, memory_mb: 1024 });
-    assert.equal(c.body.config.auto_destroy, true);
-    assert.deepEqual(c.body.config.restart, { policy: 'no' });
-    assert.deepEqual(c.body.config.init.cmd, ['node', '--disable-warning=ExperimentalWarning', 'server/remote-worker.js']);
-    assert.equal(await fly.status('d8dd9ee2f'), 'running');
-    assert.equal(await fly.status('gone'), 'stopped');
-    await fly.stop('d8dd9ee2f');
-    assert.deepEqual(calls.slice(-2).map((x) => `${x.method} ${x.url}`), ['POST /v1/apps/study/machines/d8dd9ee2f/stop', 'DELETE /v1/apps/study/machines/d8dd9ee2f?force=true']);
-    await fly.stop('gone');
-    await assert.rejects(fly.call('POST', '/machines/x/unknown'), /HTTP 500/);
-    assert.throws(() => new FlyBackend({ token: 't', app: 'a' }), /image/);
-  } finally {
-    fake.close();
-  }
+test('machines: at startup, machines recorded by a backend this server no longer runs are closed', () => {
+  const store = openDb();
+  const gone = store.createMachine({ userId: 1, backend: 'fly', name: 'engine-u1-old', cpus: 2, tokenHash: 'a' });
+  const local = store.createMachine({ userId: 1, backend: 'local', name: 'engine-u1-loc', cpus: 2, tokenHash: 'b' });
+  store.createRequest({ userId: 1, epd: E4, depth: 30, multipv: 2 });
+  const running = store.claimRequest(1, gone.id);
+  assert.equal(running.status, 'running');
 
+  new Machines({ store, backend: fakeBackend(), config: machinesConfigFromEnv({}) });
+  assert.equal(store.getMachine(gone.id).state, 'failed');
+  assert.match(store.getMachine(gone.id).error, /restarted/);
+  assert.equal(store.getRequest(running.id).status, 'queued', 'its request goes back to the queue');
+  assert.equal(store.getMachine(local.id).state, 'starting', 'local ones are left to housekeeping');
+  store.close();
+});
+
+test('backends: the local process backend, and backend selection', async () => {
   // the local backend forks a child and reports its exit
   const spawned = [];
   const local = new LocalBackend({ spawn: (script, env) => { const child = new EventEmitter(); child.kill = (sig) => { child.killed = sig; setImmediate(() => child.emit('exit', 0)); }; spawned.push({ script, env, child }); return child; } });
@@ -223,10 +195,6 @@ test('backends: Fly Machines API client against a fake API, and the local proces
   // backend selection from the environment
   assert.equal(backendFromEnv({ MACHINES: 'off' }), null);
   assert.equal(backendFromEnv({}).kind, 'local');
-  assert.equal(backendFromEnv({ FLY_APP_NAME: 'study' }), null, 'on Fly without a token: no local processes on the app machine');
-  assert.equal(backendFromEnv({ FLY_APP_NAME: 'study', FLY_API_TOKEN: 't', FLY_IMAGE_REF: 'img' }).kind, 'fly');
-  assert.throws(() => backendFromEnv({ FLY_APP_NAME: 'study', FLY_API_TOKEN: 't' }), /FLY_IMAGE_REF/);
-  assert.equal(workerApiUrlFromEnv({ FLY_APP_NAME: 'study' }, 3000), 'http://app.process.study.internal:3000');
   assert.equal(workerApiUrlFromEnv({}, 3123), 'http://127.0.0.1:3123');
   assert.equal(workerApiUrlFromEnv({ WORKER_API_URL: 'https://x' }), 'https://x');
 });

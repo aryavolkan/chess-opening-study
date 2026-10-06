@@ -57,7 +57,7 @@ export function createDeepPanel({ api, prefs, hooks }) {
     const hint = $('deep-hint');
     if (st.signedOut) hint.textContent = 'Sign in to dedicate machines to the positions you want analysed in depth.';
     else if (!s.allowed) hint.textContent = 'On this site only admins can start machines.';
-    else hint.textContent = `${s.backend === 'fly' ? 'Each machine is a Fly Machine with' : 'Each machine is a worker process with'} ${s.limits.cpus} engine${s.limits.cpus === 1 ? '' : 's'}, stops after ${Math.round(s.limits.idleSeconds / 60)} min without work or ${s.limits.maxMinutes} min in all; up to ${s.limits.perUser} per person.`;
+    else hint.textContent = `Each machine is a worker process on this server with ${s.limits.cpus} engine${s.limits.cpus === 1 ? '' : 's'}, stops after ${Math.round(s.limits.idleSeconds / 60)} min without work or ${s.limits.maxMinutes} min in all; up to ${s.limits.perUser} per person.`;
 
     const reqs = $('deep-requests');
     reqs.innerHTML = '';

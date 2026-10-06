@@ -150,7 +150,7 @@ CREATE TABLE IF NOT EXISTS explore_results (
   UNIQUE(job_id, path)
 );
 
--- Dedicated analysis machines (Fly Machines or local worker processes) and
+-- Dedicated analysis machines (worker processes on the app's host) and
 -- the per-user queue of positions they work on.
 CREATE TABLE IF NOT EXISTS machines (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
