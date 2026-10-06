@@ -206,14 +206,13 @@ function workerColor(source) {
   const map = {
     deepener: cssVar('--accent', '#2a78d6'),
     explorer: cssVar('--good', '#0ca30c'),
-    machine: cssVar('--accent-2', '#eb6834'),
     browser: cssVar('--warn', '#fab219'),
   };
   return map[source] || cssVar('--text-3', '#8a8983');
 }
 
 function workerLabel(w) {
-  const src = { deepener: 'server deepener', explorer: 'opening explorer', machine: 'dedicated machine', browser: 'browser engine' }[w.source] || w.source;
+  const src = { deepener: 'server deepener', explorer: 'opening explorer', browser: 'browser engine' }[w.source] || w.source;
   const prog = w.progress ? ` · depth ${w.progress}` : '';
   return `${src} analysing to depth ${w.depth}${prog}`;
 }

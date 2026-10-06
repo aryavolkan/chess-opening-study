@@ -16,7 +16,6 @@ import { initTheme } from '/theme.js';
 import { createPrefs } from '/prefs.js';
 import { createGamesPanel } from '/games.js';
 import { createExplorerPanel } from '/explorer.js';
-import { createDeepPanel } from '/deep.js';
 
 const MAX_BROWSER_DEPTH = 26;
 const MULTIPV = 3;
@@ -164,7 +163,6 @@ function applyAccess() {
     ? 'A second engine worker pulls the shallowest positions from the server and pushes deeper results back.'
     : 'Sign in to let your browser deepen the server\'s analysis.';
   explorerPanel.setAccess({ admin });
-  deepPanel.setAccess({ canEdit: edit, signedOut: state.auth.mode === 'on' && !state.auth.user });
   renderBookMoves();
 }
 
@@ -196,25 +194,6 @@ const explorerPanel = createExplorerPanel({
     currentLine: () => state.line.slice(0, state.cursor),
     flash,
     refreshStudy: () => refreshStudy(),
-  },
-});
-
-const deepPanel = createDeepPanel({
-  api,
-  prefs,
-  hooks: {
-    currentEpd: () => epdOf(state.chess.fen()),
-    currentLine: () => state.line.slice(0, state.cursor),
-    onSelectLine: (sans) => { if (!state.drillActive) setLine(sans); },
-    flash,
-    onAnalysisChanged: (epd) => {
-      state.analysis.delete(epd);
-      state.savedDepth.delete(epd);
-      renderEngine();
-      renderEvalBar();
-      renderBookMoves();
-      renderTreeNow();
-    },
   },
 });
 
@@ -516,7 +495,6 @@ function render() {
   scheduleTree();
   analyseCurrent();
   games.setPosition(epdOf(state.chess.fen()));
-  deepPanel.render();
 }
 
 /** Keep ?moves= in the address bar equal to the position on the board, so the link can be shared. */
@@ -1307,7 +1285,6 @@ async function main() {
     state.gamesFilter = games.filter();
     if (state.gamesTotal) render();
   });
-  deepPanel.start();
 }
 
 main().catch((err) => {
@@ -1316,4 +1293,4 @@ main().catch((err) => {
 });
 
 // exported for debugging in the console
-window.openingStudy = { state, board, engine, helper, setLine, parseOpeningsTsv, games, loadAuth, deepPanel };
+window.openingStudy = { state, board, engine, helper, setLine, parseOpeningsTsv, games, loadAuth };

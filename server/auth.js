@@ -274,6 +274,6 @@ function safeNext(next) {
 }
 
 function clientIp(req) {
-  const fwd = req.headers['fly-client-ip'] || req.headers['x-forwarded-for'];
+  const fwd = req.headers['x-forwarded-for'];
   return (fwd ? String(fwd).split(',')[0].trim() : req.socket?.remoteAddress) || 'unknown';
 }

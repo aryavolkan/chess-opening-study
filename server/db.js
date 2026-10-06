@@ -150,42 +150,8 @@ CREATE TABLE IF NOT EXISTS explore_results (
   UNIQUE(job_id, path)
 );
 
--- Dedicated analysis machines (Fly Machines or local worker processes) and
--- the per-user queue of positions they work on.
-CREATE TABLE IF NOT EXISTS machines (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id     INTEGER NOT NULL DEFAULT 0,
-  backend     TEXT NOT NULL,
-  remote_id   TEXT,
-  name        TEXT NOT NULL,
-  cpus        INTEGER NOT NULL,
-  token_hash  TEXT NOT NULL UNIQUE,
-  state       TEXT NOT NULL DEFAULT 'starting',
-  positions   INTEGER NOT NULL DEFAULT 0,
-  error       TEXT,
-  created_at  TEXT NOT NULL,
-  started_at  TEXT,
-  last_seen   TEXT,
-  stopped_at  TEXT
-);
-CREATE INDEX IF NOT EXISTS machines_user ON machines(user_id, state);
-
-CREATE TABLE IF NOT EXISTS deep_requests (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id     INTEGER NOT NULL DEFAULT 0,
-  epd         TEXT NOT NULL,
-  label       TEXT,
-  depth       INTEGER NOT NULL,
-  multipv     INTEGER NOT NULL,
-  status      TEXT NOT NULL DEFAULT 'queued',
-  machine_id  INTEGER,
-  progress    INTEGER NOT NULL DEFAULT 0,
-  error       TEXT,
-  created_at  TEXT NOT NULL,
-  started_at  TEXT,
-  finished_at TEXT
-);
-CREATE INDEX IF NOT EXISTS deep_requests_user ON deep_requests(user_id, status, id);
+-- Older databases may still hold the machines and deep_requests tables of the
+-- removed dedicated-machines feature; nothing reads them.
 
 CREATE TABLE IF NOT EXISTS public_workers (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -337,24 +303,11 @@ export class Store {
       getGame: db.prepare('SELECT * FROM games WHERE id = ?'),
       hasGameKey: db.prepare('SELECT 1 FROM games WHERE key = ?'),
 
-      insertMachine: db.prepare('INSERT INTO machines (user_id, backend, name, cpus, token_hash, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'),
-      getMachine: db.prepare('SELECT * FROM machines WHERE id = ?'),
-      machineByToken: db.prepare('SELECT * FROM machines WHERE token_hash = ?'),
-      listMachinesOf: db.prepare('SELECT * FROM machines WHERE user_id IN (?, ?) ORDER BY id DESC LIMIT 50'),
-      listMachinesAll: db.prepare('SELECT * FROM machines ORDER BY id DESC LIMIT 200'),
-      activeMachines: db.prepare("SELECT * FROM machines WHERE state IN ('starting', 'running', 'idle', 'stopping')"),
-      insertRequest: db.prepare('INSERT INTO deep_requests (user_id, epd, label, depth, multipv, created_at) VALUES (?, ?, ?, ?, ?, ?)'),
-      getRequest: db.prepare('SELECT * FROM deep_requests WHERE id = ?'),
-      pendingRequest: db.prepare("SELECT * FROM deep_requests WHERE user_id = ? AND epd = ? AND status IN ('queued', 'running') LIMIT 1"),
-      listRequestsOf: db.prepare("SELECT * FROM deep_requests WHERE user_id IN (?, ?) AND (status IN ('queued', 'running') OR finished_at > ?) ORDER BY id DESC LIMIT 100"),
-      listRequestsRunning: db.prepare("SELECT * FROM deep_requests WHERE status = 'running' ORDER BY id"),
-      nextRequest: db.prepare("SELECT * FROM deep_requests WHERE user_id = ? AND status = 'queued' ORDER BY id LIMIT 1"),
       insertPublicWorker: db.prepare('INSERT INTO public_workers (token_hash, name, created_at, last_seen_at, positions_done) VALUES (?, ?, ?, ?, 0)'),
       getPublicWorker: db.prepare('SELECT * FROM public_workers WHERE token_hash = ?'),
       listPublicWorkers: db.prepare("SELECT * FROM public_workers WHERE last_seen_at > ? ORDER BY last_seen_at DESC LIMIT 1000"),
       touchPublicWorker: db.prepare("UPDATE public_workers SET last_seen_at = ?, positions_done = ? WHERE token_hash = ?"),
       deletePublicWorker: db.prepare('DELETE FROM public_workers WHERE token_hash = ?'),
-      requeueOfMachine: db.prepare("UPDATE deep_requests SET status = 'queued', machine_id = NULL, started_at = NULL WHERE machine_id = ? AND status = 'running'"),
 
       insertExploreJob: db.prepare('INSERT INTO explore_jobs (user_id, name, color, scope, params, total, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'),
       listExploreJobs: db.prepare('SELECT * FROM explore_jobs ORDER BY id'),
@@ -747,75 +700,7 @@ export class Store {
     };
   }
 
-  // ---- dedicated machines and deep-analysis requests --------------------
-
-  createMachine({ userId = LOCAL_USER_ID, backend, name, cpus, tokenHash, createdAt = new Date().toISOString() }) {
-    const r = this.stmts.insertMachine.run(userId, backend, name, cpus, tokenHash, 'starting', createdAt);
-    return this.getMachine(Number(r.lastInsertRowid));
-  }
-
-  getMachine(id) {
-    const row = this.stmts.getMachine.get(id);
-    return row ? rowToMachine(row) : null;
-  }
-
-  machineByTokenHash(hash) {
-    const row = this.stmts.machineByToken.get(hash);
-    return row ? rowToMachine(row) : null;
-  }
-
-  updateMachine(id, fields) {
-    const sets = [];
-    const params = { $id: id };
-    const cols = { state: 'state', remoteId: 'remote_id', error: 'error', startedAt: 'started_at', lastSeen: 'last_seen', stoppedAt: 'stopped_at' };
-    for (const [k, col] of Object.entries(cols)) {
-      if (fields[k] !== undefined) { sets.push(`${col} = $${k}`); params[`$${k}`] = fields[k]; }
-    }
-    if (fields.positionsDone) sets.push(`positions = positions + ${Number(fields.positionsDone) | 0}`);
-    if (!sets.length) return this.getMachine(id);
-    this.prepared(`UPDATE machines SET ${sets.join(', ')} WHERE id = $id`).run(params);
-    return this.getMachine(id);
-  }
-
-  /** The scope's machines (own ones; everything for the unrestricted local scope). */
-  listMachines(scope = localScope()) {
-    const o = owners(scope);
-    if (o === null) return this.stmts.listMachinesAll.all().map(rowToMachine);
-    if (!o.length) return [];
-    return this.stmts.listMachinesOf.all(o[0], o[1] ?? o[0]).map(rowToMachine);
-  }
-
-  activeMachines() {
-    return this.stmts.activeMachines.all().map(rowToMachine);
-  }
-
-  createRequest({ userId = LOCAL_USER_ID, epd, label = null, depth, multipv }) {
-    const existing = this.stmts.pendingRequest.get(userId, epd);
-    if (existing) return { created: false, request: rowToRequest(existing) };
-    const r = this.stmts.insertRequest.run(userId, epd, label, depth, multipv, new Date().toISOString());
-    return { created: true, request: this.getRequest(Number(r.lastInsertRowid)) };
-  }
-
-  getRequest(id) {
-    const row = this.stmts.getRequest.get(id);
-    return row ? rowToRequest(row) : null;
-  }
-
-  /** Pending requests of the scope, plus those finished in the last day. */
-  listRequests(scope = localScope()) {
-    const o = owners(scope) ?? [LOCAL_USER_ID];
-    if (!o.length) return [];
-    const since = new Date(Date.now() - 86400000).toISOString();
-    if (!scope.restrict) {
-      return this.prepared(`SELECT * FROM deep_requests WHERE status IN ('queued', 'running') OR finished_at > $since ORDER BY id DESC LIMIT 100`).all({ $since: since }).map(rowToRequest);
-    }
-    return this.stmts.listRequestsOf.all(o[0], o[1] ?? o[0], since).map(rowToRequest);
-  }
-
-  /** Every request currently being analysed, for the shared worker visualization. */
-  listAllRequests() {
-    return this.stmts.listRequestsRunning.all().map(rowToRequest);
-  }
+  // ---- public contributor workers -------------------------------------
 
   /** Register a public contributor worker and return its row. */
   createPublicWorker({ tokenHash, name, now }) {
@@ -846,31 +731,6 @@ export class Store {
 
   removePublicWorker(tokenHash) {
     this.stmts.deletePublicWorker.run(tokenHash);
-  }
-
-  /** Hand the user's oldest queued request to a machine. */
-  claimRequest(userId, machineId) {
-    const row = this.stmts.nextRequest.get(userId);
-    if (!row) return null;
-    this.prepared("UPDATE deep_requests SET status = 'running', machine_id = $m, started_at = $t WHERE id = $id").run({ $m: machineId, $t: new Date().toISOString(), $id: row.id });
-    return this.getRequest(row.id);
-  }
-
-  updateRequest(id, fields) {
-    const sets = [];
-    const params = { $id: id };
-    const cols = { status: 'status', progress: 'progress', error: 'error', machineId: 'machine_id', finishedAt: 'finished_at' };
-    for (const [k, col] of Object.entries(cols)) {
-      if (fields[k] !== undefined) { sets.push(`${col} = $${k}`); params[`$${k}`] = fields[k]; }
-    }
-    if (!sets.length) return this.getRequest(id);
-    this.prepared(`UPDATE deep_requests SET ${sets.join(', ')} WHERE id = $id`).run(params);
-    return this.getRequest(id);
-  }
-
-  /** Running requests of a machine that died go back to the queue. */
-  requeueRequestsOf(machineId) {
-    return this.stmts.requeueOfMachine.run(machineId).changes;
   }
 
   // ---- opening explorer -----------------------------------------------
@@ -1102,42 +962,6 @@ function rowToGameSummary(row) {
 
 function rowToGame(row) {
   return { ...rowToGameSummary(row), moves: row.moves ? row.moves.split(' ') : [] };
-}
-
-function rowToMachine(row) {
-  return {
-    id: row.id,
-    userId: row.user_id,
-    backend: row.backend,
-    remoteId: row.remote_id,
-    name: row.name,
-    cpus: row.cpus,
-    state: row.state,
-    positions: row.positions,
-    error: row.error,
-    createdAt: row.created_at,
-    startedAt: row.started_at,
-    lastSeen: row.last_seen,
-    stoppedAt: row.stopped_at,
-  };
-}
-
-function rowToRequest(row) {
-  return {
-    id: row.id,
-    userId: row.user_id,
-    epd: row.epd,
-    label: row.label,
-    depth: row.depth,
-    multipv: row.multipv,
-    status: row.status,
-    machineId: row.machine_id,
-    progress: row.progress,
-    error: row.error,
-    createdAt: row.created_at,
-    startedAt: row.started_at,
-    finishedAt: row.finished_at,
-  };
 }
 
 function rowToExploreJob(row) {
