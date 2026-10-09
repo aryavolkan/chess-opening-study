@@ -1,5 +1,7 @@
 // Thin fetch wrapper around the JSON API.
 
+import { staticApi } from './static-api.js';
+
 async function request(method, path, body) {
   const res = await fetch(path, {
     method,
@@ -43,7 +45,7 @@ function upload(path, file, onProgress) {
   });
 }
 
-export const api = {
+const serverApi = {
   me: () => request('GET', '/auth/me'),
   logout: () => request('POST', '/auth/logout'),
   openings: () => request('GET', '/api/openings'),
@@ -83,3 +85,7 @@ export const api = {
   exploreStop: () => request('POST', '/api/explore/stop'),
   exploreResults: (jobId) => request('GET', `/api/explore/results?${qs({ job: jobId })}`),
 };
+
+// The GitHub Pages build marks itself with this tag and has no server behind it.
+const browserOnly = typeof document !== 'undefined' && Boolean(document.querySelector('meta[name="static-demo"]'));
+export const api = browserOnly ? staticApi : serverApi;

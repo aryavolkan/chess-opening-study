@@ -107,6 +107,14 @@ engine and book-arrow toggles and the tree depth are remembered by the
 browser. Keys: ← → step through the line, Home/End jump to either end, `f`
 flips the board.
 
+## Try it in the browser
+
+A browser-only build of the app is published to GitHub Pages
+(`scripts/build-pages.js`): the book, board, tree, Stockfish in the browser
+and the study set all work, with analysis and the study set kept in
+localStorage. Games import, the opening explorer and server deepening need
+the server below.
+
 ## Running it
 
 Requires Node.js 22.5 or newer (for the built-in SQLite module).

@@ -4,3 +4,4 @@ data/*.sqlite-journal
 data/*.sqlite-wal
 data/*.sqlite-shm
 .DS_Store
+dist/
