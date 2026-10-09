@@ -139,16 +139,27 @@ export function createExplorerPanel({ api, prefs, hooks }) {
     if (!rows.length) { $('explore-more').hidden = true; return; }
     const hasGames = rows.some((r) => r.games);
     const head = document.createElement('thead');
-    head.innerHTML = `<tr><th>opening</th><th title="Engine evaluation of the opening's position, from your point of view">eval</th><th title="Worst evaluation at the end of the lines you must know">worst</th>
-      <th title="Positions where you must know a move (within the horizon)">learn</th><th title="Distinct moves of yours in those positions">moves</th><th title="Average loss, in pawns, of playing your second-best move: lower is more forgiving">2nd best</th>
-      <th title="Named book lines below this opening">theory</th>${hasGames ? '<th title="How often opponents in your games played into this opening">reach</th><th>games</th>' : ''}<th title="0–100: sound and little to learn">fit</th><th></th></tr>`;
+    head.innerHTML = `<tr><th>opening</th><th data-sort="eval" title="Engine evaluation of the opening's position, from your point of view">eval</th><th data-sort="worst" title="Worst evaluation at the end of the lines you must know">worst</th>
+      <th data-sort="decisions" title="Positions where you must know a move (within the horizon)">learn</th><th title="Distinct moves of yours in those positions">moves</th><th data-sort="forgiveness" title="Average loss, in pawns, of playing your second-best move: lower is more forgiving">2nd best</th>
+      <th data-sort="theory" title="Named book lines below this opening">theory</th>${hasGames ? '<th data-sort="reach" title="How often opponents in your games played into this opening">reach</th><th data-sort="games">games</th>' : ''}<th data-sort="fit" title="0–100: sound and little to learn">fit</th><th></th></tr>`;
+    head.querySelectorAll('th[data-sort]').forEach((th) => {
+      const sorted = th.dataset.sort === st.sort;
+      th.classList.toggle('sorted', sorted);
+      if (sorted) th.textContent += ' ▾';
+      th.onclick = () => {
+        st.sort = th.dataset.sort;
+        $('explore-sort').value = st.sort;
+        prefs.set('exploreSort', st.sort);
+        renderResults();
+      };
+    });
     table.appendChild(head);
     const body = document.createElement('tbody');
     for (const r of rows.slice(0, st.shown)) {
       const tr = document.createElement('tr');
       const pawns = (cp) => (Math.abs(cp) >= 9000 ? (cp > 0 ? '#' : '#−') : (cp > 0 ? '+' : cp < 0 ? '−' : '') + (Math.abs(cp) / 100).toFixed(2));
       tr.innerHTML = `<td class="name" title="${esc(r.name)} (${esc(r.path.join(' '))})"><span class="eco">${esc(r.eco || '')}</span>${esc(r.name)}</td>
-        <td class="${r.eval < -50 ? 'bad' : ''}">${pawns(r.eval)}</td><td class="${r.worst < -100 ? 'bad' : ''}">${pawns(r.worst)}</td>
+        <td class="${r.eval < -50 ? 'bad' : r.eval >= 30 ? 'good' : ''}">${pawns(r.eval)}</td><td class="${r.worst < -100 ? 'bad' : ''}">${pawns(r.worst)}</td>
         <td>${r.decisions}</td><td>${r.moves}</td><td>${r.forgiveness === null || r.forgiveness === undefined ? '–' : (r.forgiveness / 100).toFixed(2)}</td><td>${r.theory}</td>
         ${hasGames ? `<td>${r.reach === null || r.reach === undefined ? '–' : `${Math.round(r.reach * 100)}%`}</td><td>${r.games ? r.games.games : '–'}</td>` : ''}
         <td><span class="fitbar"><i style="width:${r.fit}%"></i></span>${r.fit}</td>
