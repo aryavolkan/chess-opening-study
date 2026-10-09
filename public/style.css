@@ -410,6 +410,11 @@ input[type=search], input[type=number] {
 .tree-scroll { overflow: auto; max-height: 70vh; }
 .tree { display: block; font-size: 12px; }
 .tree .edge { fill: none; stroke: var(--border); stroke-width: 1.5; }
+.tree .edge.best { stroke: var(--accent); stroke-width: 2.25; opacity: .75; }
+.tree .edge.hl { stroke: var(--accent); stroke-width: 2.75; opacity: 1; }
+.tree.hovering .edge:not(.hl) { opacity: .25; }
+.tree.hovering .node:not(.hl) { opacity: .55; }
+.tree .node text.ev { fill: var(--text-2); font-size: 10px; font-variant-numeric: tabular-nums; font-family: ui-monospace, monospace; }
 .tree .edge.onpath { stroke: var(--text-2); stroke-width: 2; }
 .tree .edge.flow { stroke: var(--text-3); opacity: .7; }
 .tree .edge.flow.onpath { stroke: var(--text-2); opacity: 1; }
@@ -440,6 +445,8 @@ input[type=search], input[type=number] {
 }
 .tree-legend { font-size: 11px; color: var(--text-3); margin-top: 6px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; }
+.swatch.line { width: 16px; height: 3px; border-radius: 2px; }
+.swatch.line.best { background: var(--accent); opacity: .75; }
 .swatch.ring { background: var(--surface); border: 1.5px solid var(--text-3); }
 .swatch.ring.none { border-style: dashed; }
 .swatch.ring.deep { border: 2.5px solid var(--text); }

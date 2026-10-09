@@ -5,7 +5,7 @@
 import { winningChances, formatScore, scoreForWhite } from '/shared/uci.js';
 import { sideToMove } from '/shared/fen.js';
 
-const COL_W = 118;
+const COL_W = 140;
 const ROW_H = 34;
 const PAD_X = 24;
 const PAD_Y = 22;
@@ -80,6 +80,9 @@ export function renderTree(svg, o) {
   const gamesOf = (node) => (games && node.epd ? games.get(node.epd)?.games || 0 : 0);
   const rootGames = games ? gamesOf(root) : 0;
 
+  const edgeEls = new Map(); // node -> its incoming edge
+  const nodeEls = new Map(); // node -> its <g>
+
   // edges first so nodes draw on top
   for (const [node, pos] of visible) {
     if (node === root || !node.parent) continue;
@@ -92,6 +95,8 @@ export function renderTree(svg, o) {
     const mx = (x1 + x2) / 2;
     const cls = ['edge'];
     if (onPath.has(node) && onPath.has(node.parent)) cls.push('onpath');
+    const parentBest = node.parent.epd ? analysis.get(node.parent.epd)?.bestMove : null;
+    if (parentBest && node.uci === parentBest) cls.push('best');
     const attrs = { d: `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}` };
     if (rootGames) {
       const n = gamesOf(node);
@@ -99,7 +104,9 @@ export function renderTree(svg, o) {
       if (n) attrs['stroke-width'] = (1.5 + 8 * Math.sqrt(n / rootGames)).toFixed(1);
     }
     attrs.class = cls.join(' ');
-    svg.appendChild(el('path', attrs));
+    const path = el('path', attrs);
+    edgeEls.set(node, path);
+    svg.appendChild(path);
   }
 
   for (const [node, pos] of visible) {
@@ -111,14 +118,20 @@ export function renderTree(svg, o) {
     const g = el('g', { class: cls.join(' '), transform: `translate(${x(pos.col)},${y(pos.row)})` });
     const circle = el('circle', { r: R, fill: a ? evalColor(a, node.epd) : 'var(--surface)' });
     g.appendChild(circle);
-    const san = el('text', { class: 'san', x: R + 5, y: 4 });
+    const san = el('text', { class: 'san', x: R + 5, y: -3 });
     san.textContent = node.san ? moveLabel(node) : 'start';
     g.appendChild(san);
     let cx = R + 5 + textWidth(san.textContent) + 6;
+    if (a) {
+      const ev = el('text', { class: 'ev', x: cx, y: -3 });
+      ev.textContent = formatScore(scoreForWhite(a.score, sideToMove(node.epd)));
+      g.appendChild(ev);
+      cx += textWidth(ev.textContent) * 0.85 + 6;
+    }
     if (games) {
       const n = gamesOf(node);
       if (n) {
-        const count = el('text', { class: 'games', x: cx, y: 4 });
+        const count = el('text', { class: 'games', x: cx, y: -3 });
         count.textContent = `${n}`;
         g.appendChild(count);
         cx += textWidth(count.textContent) + 6;
@@ -126,26 +139,36 @@ export function renderTree(svg, o) {
     }
     const hidden = !pos.open && node.children.size > 0;
     if (hidden) {
-      const more = el('text', { class: 'more', x: cx, y: 4 });
+      const more = el('text', { class: 'more', x: cx, y: -3 });
       more.textContent = `⊕${countHidden(node)}`;
       more.addEventListener('click', (e) => { e.stopPropagation(); o.onToggle(node); });
       g.appendChild(more);
     } else if (pos.open && node !== root && expanded.has(node)) {
-      const less = el('text', { class: 'more', x: cx, y: 4 });
+      const less = el('text', { class: 'more', x: cx, y: -3 });
       less.textContent = '⊖';
       less.addEventListener('click', (e) => { e.stopPropagation(); o.onToggle(node); });
       g.appendChild(less);
     }
     if (node.name && node !== root) {
-      const name = el('text', { class: 'name', x: R + 5, y: 15 });
+      const name = el('text', { class: 'name', x: R + 5, y: 13 });
       name.textContent = shortName(node.name, node.parent);
       g.appendChild(name);
     }
     g.addEventListener('click', () => o.onSelect(node));
-    g.addEventListener('mouseenter', (e) => o.onHover(e, node, a));
+    nodeEls.set(node, g);
+    g.addEventListener('mouseenter', (e) => { lineage(node, true); o.onHover(e, node, a); });
     g.addEventListener('mousemove', (e) => o.onHover(e, node, a));
-    g.addEventListener('mouseleave', (e) => o.onHover(e, null));
+    g.addEventListener('mouseleave', (e) => { lineage(node, false); o.onHover(e, null); });
     svg.appendChild(g);
+  }
+
+  /** Light up the line from the root to a hovered node and dim the rest. */
+  function lineage(node, on) {
+    svg.classList.toggle('hovering', on);
+    for (let n = node; n; n = n.parent) {
+      edgeEls.get(n)?.classList.toggle('hl', on);
+      nodeEls.get(n)?.classList.toggle('hl', on);
+    }
   }
 
   // Worker dots: shared CPUs currently analysing positions in the visible tree.
@@ -294,7 +317,7 @@ export function evalColor(a, epd) {
 function mixEval(t) {
   const mid = cssVar('--eval-mid', '#cfcdc6');
   const pole = t >= 0 ? cssVar('--eval-white', '#2a78d6') : cssVar('--eval-black', '#e34948');
-  const k = Math.min(1, Math.abs(t) * 1.6);
+  const k = Math.min(1, Math.sqrt(Math.abs(t)) * 1.5); // opening evals are small; keep them visible
   return mixHex(mid, pole, k);
 }
 
