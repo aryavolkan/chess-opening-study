@@ -13,7 +13,10 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(ROOT, 'public', 'themes');
-const RAW = 'https://raw.githubusercontent.com/lichess-org/lila/master/public/';
+// Pinned to one lila commit so builds are reproducible and nothing new is
+// pulled in unreviewed; bump the hash (and check COPYING.md) to pick up new sets.
+const LILA_COMMIT = 'c91f1d09d0f72e913a56cb5d2d8225f6c0f8e0a2';
+const RAW = `https://raw.githubusercontent.com/lichess-org/lila/${LILA_COMMIT}/public/`;
 const force = process.argv.includes('--force');
 
 // id, display name, author, licence (from lila's COPYING.md), file type when not svg
@@ -139,7 +142,7 @@ writeFileSync(join(OUT, 'index.json'), JSON.stringify({
 writeFileSync(join(OUT, 'CREDITS.md'), `# Board and piece themes
 
 Downloaded by \`scripts/fetch-themes.js\` from the [lila](https://github.com/lichess-org/lila)
-repository (\`public/piece\` and \`public/images/board\`). They are not part of this
+repository at commit ${LILA_COMMIT} (\`public/piece\` and \`public/images/board\`). They are not part of this
 project's MIT licence; each set keeps its own, as listed in lila's COPYING.md:
 
 | Piece set | Author | Licence |

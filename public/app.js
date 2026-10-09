@@ -34,7 +34,6 @@ const state = {
   chess: new Chess(),
   orientation: 'white',
   engineOn: prefs.get('engineOn', true) !== false,
-  arrowsOn: prefs.get('arrowsOn', true) !== false,
   live: null,        // latest snapshot from the browser engine for the current epd
   liveEpd: null,
   analysis: new Map(),   // epd -> stored record (null when known to be absent)
@@ -527,15 +526,6 @@ function renderBoard() {
 function boardShapes() {
   if (state.drillActive) return [];
   const shapes = [];
-  if (state.arrowsOn) {
-    const node = currentNode();
-    if (node) {
-      annotate(node);
-      for (const child of node.children.values()) {
-        if (child.uci) shapes.push({ orig: child.uci.slice(0, 2), dest: child.uci.slice(2, 4), brush: child.name ? 'green' : 'paleGreen' });
-      }
-    }
-  }
   const best = state.live?.lines?.[0]?.pv?.[0] || state.analysis.get(epdOf(state.chess.fen()))?.bestMove;
   if (best && state.engineOn) shapes.push({ orig: best.slice(0, 2), dest: best.slice(2, 4), brush: 'blue' });
   return shapes;
@@ -1183,13 +1173,11 @@ function bind() {
   $('nav-end').onclick = () => goTo(state.line.length);
   $('flip').onclick = () => { state.orientation = state.orientation === 'white' ? 'black' : 'white'; renderBoard(); };
   $('engine-toggle').checked = state.engineOn;
-  $('arrows-toggle').checked = state.arrowsOn;
   $('tree-depth').value = state.treeDepth;
   $('tree-order').value = state.treeOrder;
   $('tree-branches').value = String(state.treeBranches);
   // analyseCurrent() stops the running search when the engine is switched off, as long as liveEpd still marks it
   $('engine-toggle').onchange = (e) => { state.engineOn = e.target.checked; prefs.set('engineOn', state.engineOn); render(); };
-  $('arrows-toggle').onchange = (e) => { state.arrowsOn = e.target.checked; prefs.set('arrowsOn', state.arrowsOn); renderBoard(); };
   $('copy-link').onclick = () => copyText(location.href, 'link');
   $('copy-pgn').onclick = () => copyText(sanToPgn(state.line.slice(0, state.cursor)), 'PGN');
   $('copy-fen').onclick = () => copyText(state.chess.fen(), 'FEN');

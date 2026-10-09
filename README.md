@@ -14,9 +14,10 @@ gets deeper the longer you run it.
 
 **Explore.** The full [lichess opening book](https://github.com/lichess-org/chess-openings)
 (3,800 named openings, ECO A00 to E99) is loaded as a move tree. Search by
-name, ECO code or moves, or click a cell in the ECO map. On the board every
-book continuation is drawn as an arrow, listed with its stored engine
-evaluation, and the variation tree below the board shows the lines that
+name, ECO code or moves, or click a cell in the ECO map. Every book
+continuation from the position on the board is listed with its stored engine
+evaluation, the engine's best move is drawn as an arrow on the board, and the
+variation tree below the board shows the lines that
 branch out from the current position, coloured by evaluation. Replies are
 ordered with the engine's best move first (or by how often you played them,
 or in book order), only the top few are drawn per position until you ask for
@@ -119,8 +120,8 @@ position on the board (`?moves=e4 c5 Nf3`), so a reload or a pasted link
 lands on the same position; the copy buttons under the board give you that
 link, the moves as PGN, or the position as FEN. The top bar has an
 Auto / Light / Dark switch (Auto follows the operating system), and the
-engine and book-arrow toggles, the board size and themes, and the tree's
-depth, order and reply cap are remembered by the browser. Keys: ← → step through the line, Home/End jump to either end, `f`
+engine toggle, the board size and themes, and the tree's depth, order and
+reply cap are remembered by the browser. Keys: ← → step through the line, Home/End jump to either end, `f`
 flips the board.
 
 ## Try it in the browser
