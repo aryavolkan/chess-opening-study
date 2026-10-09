@@ -387,6 +387,11 @@ input[type=search], input[type=number] {
 .job-list .status.done { color: var(--good); }
 .table-scroll { overflow-x: auto; max-width: 100%; }
 .explore-results { width: 100%; border-collapse: collapse; font-size: 12px; }
+.explore-results thead th { position: sticky; top: 0; background: var(--surface); z-index: 1; }
+.explore-results th[data-sort] { cursor: pointer; user-select: none; }
+.explore-results th[data-sort]:hover { color: var(--text); }
+.explore-results th.sorted { color: var(--accent); }
+.explore-results .good { color: var(--good); }
 .explore-results th { text-align: right; font-weight: 600; color: var(--text-3); font-size: 10px; text-transform: uppercase; letter-spacing: .03em; padding: 3px 4px; border-bottom: 1px solid var(--border); white-space: nowrap; }
 .explore-results th:first-child, .explore-results td:first-child { text-align: left; }
 .explore-results td { padding: 3px 4px; border-bottom: 1px solid var(--border); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -416,7 +421,12 @@ input[type=search], input[type=number] {
 .tree .node.shallow circle { stroke: var(--text-3); }
 .tree .node.deep circle { stroke: var(--text); stroke-width: 2.5; }
 .tree .node.current circle { stroke: var(--accent); stroke-width: 3; }
+.tree .node text { paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
 .tree .node text.san { fill: var(--text); font-family: ui-monospace, monospace; }
+.tree .node.onpath text.san, .tree .node.current text.san { font-weight: 700; }
+.tree .node.current text.san { fill: var(--accent); }
+.tree .node.onpath circle { stroke-width: 2.5; }
+.tree .node circle { transition: stroke .12s, stroke-width .12s; }
 .tree .node.named text.san { font-weight: 700; }
 .tree .node text.name { fill: var(--text-3); font-size: 10px; }
 .tree .node text.more { fill: var(--accent); font-size: 11px; font-weight: 700; }

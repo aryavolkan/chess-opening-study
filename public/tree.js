@@ -107,6 +107,7 @@ export function renderTree(svg, o) {
     const cls = ['node', depthClass(a?.depth)];
     if (node.name) cls.push('named');
     if (node === o.current) cls.push('current');
+    else if (onPath.has(node)) cls.push('onpath');
     const g = el('g', { class: cls.join(' '), transform: `translate(${x(pos.col)},${y(pos.row)})` });
     const circle = el('circle', { r: R, fill: a ? evalColor(a, node.epd) : 'var(--surface)' });
     g.appendChild(circle);
@@ -199,7 +200,25 @@ export function renderTree(svg, o) {
     }
   }
 
+  keepCurrentInView(svg, visible.get(o.current), o.current, x, y);
   return { nodes: visible.size };
+}
+
+/** Scroll the tree's container so the node the board is on stays visible; only when it changes. */
+function keepCurrentInView(svg, pos, current, x, y) {
+  if (!pos || svg._followed === current) return;
+  svg._followed = current;
+  const box = svg.parentElement;
+  if (!box || box.clientWidth === 0) return;
+  const cx = x(pos.col);
+  const cy = y(pos.row);
+  const margin = 80;
+  if (cx < box.scrollLeft + margin || cx > box.scrollLeft + box.clientWidth - COL_W) {
+    box.scrollLeft = Math.max(0, cx - box.clientWidth / 3);
+  }
+  if (cy < box.scrollTop + margin || cy > box.scrollTop + box.clientHeight - margin) {
+    box.scrollTop = Math.max(0, cy - box.clientHeight / 2);
+  }
 }
 
 function workerColor(source) {
