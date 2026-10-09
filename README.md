@@ -17,11 +17,16 @@ gets deeper the longer you run it.
 name, ECO code or moves, or click a cell in the ECO map. On the board every
 book continuation is drawn as an arrow, listed with its stored engine
 evaluation, and the variation tree below the board shows the lines that
-branch out from the current position, coloured by evaluation. When any
-server or browser engine is analysing a book position, a small pulsing dot
-appears on that node so you can watch the shared CPU pool work. Click any
-node to jump there; play any move on the board to leave the book and analyse
-on your own.
+branch out from the current position, coloured by evaluation. Replies are
+ordered with the engine's best move first (or by how often you played them,
+or in book order), only the top few are drawn per position until you ask for
+"more", the engine's best reply is drawn in blue, and a move that gives away
+winning chances compared with the position before it is marked `?!`, `?` or
+`??`. Hovering a node lights up its whole line; the line on the board is
+always kept open, however deep it runs. When any server or browser engine is
+analysing a book position, a small pulsing dot appears on that node so you
+can watch the shared CPU pool work. Click any node to jump there; play any
+move on the board to leave the book and analyse on your own.
 
 **Study.** Add any line to the study set, to be played as White or as Black.
 Drill mode plays the opponent's moves and waits for yours; one wrong move
@@ -98,13 +103,24 @@ the study set in one click. Jobs run in the background, survive a restart,
 can be stopped and resumed, and everything they analyse is stored, so the
 rest of the app gets deeper analysis for free.
 
+**Board size and themes.** The board is sized to the window: as large as
+fits beside the side columns and under the top bar. Drag the handle in its
+bottom-right corner to make it bigger or smaller (double-click the handle to
+fit the window again), or use the size slider behind the ⚙ button next to
+the flip button. The same panel chooses the board colours and the piece set:
+`npm run fetch-themes` downloads about 30 lichess piece sets and two dozen
+board textures into `public/themes/` (they keep their own licences, listed in
+the generated `CREDITS.md`, which is why they are not part of this
+repository); without them the built-in cburnett pieces on a brown board are
+used. The Docker image and the GitHub Pages build fetch them automatically.
+
 **Sharing, theme and preferences.** The address bar always holds the
 position on the board (`?moves=e4 c5 Nf3`), so a reload or a pasted link
 lands on the same position; the copy buttons under the board give you that
 link, the moves as PGN, or the position as FEN. The top bar has an
 Auto / Light / Dark switch (Auto follows the operating system), and the
-engine and book-arrow toggles and the tree depth are remembered by the
-browser. Keys: ← → step through the line, Home/End jump to either end, `f`
+engine and book-arrow toggles, the board size and themes, and the tree's
+depth, order and reply cap are remembered by the browser. Keys: ← → step through the line, Home/End jump to either end, `f`
 flips the board.
 
 ## Try it in the browser
@@ -172,6 +188,13 @@ Refresh the vendored opening book from lichess:
 
 ```sh
 npm run fetch-openings
+```
+
+Download the lichess piece sets and board textures (into `public/themes/`,
+which is not committed):
+
+```sh
+npm run fetch-themes
 ```
 
 Tests:
@@ -285,6 +308,8 @@ server/openings.js     loads the book, computes the position of every node
 server/db.js           SQLite: analysis, study_lines, settings, imports, games, game_positions
 server/games.js        PGN import: replay with chessops, classify by book position, index positions
 scripts/import-pgn.js  the same import from the command line
+scripts/fetch-themes.js downloads lichess piece sets and board textures, writes public/themes/{themes.css,index.json,CREDITS.md}
+public/board-theme.js  board size (fit to window × user scale), the ⚙ panel, theme classes on <body>
 server/engine.js       Stockfish in Node with analyse(fen, {depth, multipv})
 server/deepener.js     background queue that raises stored depth
 server/engine-pool.js  pool of engine worker processes (engine-worker.js) with a request queue

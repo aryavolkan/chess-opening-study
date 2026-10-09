@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="/vendor/chessground/assets/chessground.base.css">
   <link rel="stylesheet" href="/vendor/chessground/assets/chessground.brown.css">
   <link rel="stylesheet" href="/vendor/chessground/assets/chessground.cburnett.css">
+  <link rel="stylesheet" href="/themes/themes.css">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -193,6 +194,7 @@
         </div>
         <div class="board-box">
           <div id="board" class="cg-wrap"></div>
+          <div class="board-resize" id="board-resize" title="Drag to resize the board · double-click to fit the window" aria-hidden="true"></div>
         </div>
       </div>
       <div class="position-head">
@@ -206,6 +208,7 @@
         <button class="btn icon" id="nav-fwd" title="Forward (→)" aria-label="One move forward (Right arrow)">▶</button>
         <button class="btn icon" id="nav-end" title="End (End)" aria-label="Go to the end of the line (End)">⏭</button>
         <button class="btn icon" id="flip" title="Flip board (f)" aria-label="Flip the board (f)">⇅</button>
+        <button class="btn icon" id="board-settings-btn" title="Board size, pieces and colours" aria-label="Board size, pieces and colours" aria-expanded="false" aria-controls="board-settings">⚙</button>
         <label class="switch" for="engine-toggle" title="Toggle browser engine">
           <input type="checkbox" id="engine-toggle" checked>
           <span class="switch-slider"></span>
@@ -222,6 +225,22 @@
           <button class="btn small" id="copy-pgn" title="Copy the moves on the board as PGN">PGN</button>
           <button class="btn small" id="copy-fen" title="Copy the position as FEN">FEN</button>
         </span>
+      </div>
+      <div class="board-settings" id="board-settings" hidden>
+        <div class="panel-head">
+          <h2>Board</h2>
+          <button class="link" id="board-settings-close">close</button>
+        </div>
+        <label class="board-scale-row">size
+          <input type="range" id="board-scale" min="50" max="200" step="5" value="100" aria-label="Board size, percent of the fitted size">
+          <span class="mono" id="board-scale-value">100%</span>
+          <button class="link" id="board-scale-reset" title="Fit the board to the window">fit</button>
+        </label>
+        <div class="theme-title">colours</div>
+        <div class="theme-grid" id="board-themes"></div>
+        <div class="theme-title">pieces</div>
+        <div class="theme-grid" id="piece-sets"></div>
+        <p class="hint" id="themes-missing" hidden>Only the built-in theme is installed. Run <code>npm run fetch-themes</code> to add the lichess piece sets and board textures.</p>
       </div>
       <div class="moves" id="moves"></div>
       <div class="drill-box" id="drill-box" hidden></div>
@@ -311,6 +330,16 @@
           <span id="tree-root-name" class="mono"></span>
           <label class="toggle"><input type="checkbox" id="tree-pin"> pin root</label>
           <label>depth <input type="number" id="tree-depth" min="1" max="12" value="4" style="width:3.5em"></label>
+          <label title="How the replies to each position are ordered">order <select id="tree-order">
+            <option value="eval">best move first</option>
+            <option value="games">most played</option>
+            <option value="book">book</option>
+          </select></label>
+          <label title="How many replies to show per position before a “more” row">replies <select id="tree-branches">
+            <option value="6">top 6</option>
+            <option value="10">top 10</option>
+            <option value="0">all</option>
+          </select></label>
           <button class="btn small" id="tree-up" title="Show the tree one move earlier">↑ parent</button>
         </div>
       </div>
@@ -326,10 +355,12 @@
         <span class="sep"></span>
         <span class="swatch line best"></span> engine's best reply
         <span class="sep"></span>
+        <span class="quality-key">?!&nbsp;?&nbsp;??</span> inaccuracy · mistake · blunder (vs. the parent's evaluation)
+        <span class="sep"></span>
         <span class="swatch" style="background:var(--accent)"></span> deepener
         <span class="swatch" style="background:var(--good)"></span> explorer
         <span class="swatch" style="background:var(--warn)"></span> browser
-        <span class="sep"></span> bold = named opening · hover to trace the line · click a node to go there · ⊕ expands
+        <span class="sep"></span> bold = named opening · hover to trace the line · click a node to go there · ⊕ expands · “+N more” shows every reply
         <span class="sep"></span><span id="tree-games-legend" hidden>edge width = share of your games · number = games through the node</span>
       </div>
       <div class="tooltip" id="tooltip" hidden></div>
