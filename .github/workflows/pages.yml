@@ -2,7 +2,7 @@ name: pages
 on:
   push:
     branches: [main]
-    paths: ['public/**', 'shared/**', 'data/**', 'scripts/build-pages.js', 'package-lock.json', '.github/workflows/pages.yml']
+    paths: ['public/**', 'shared/**', 'data/**', 'scripts/build-pages.js', 'scripts/fetch-themes.js', 'package-lock.json', '.github/workflows/pages.yml']
   workflow_dispatch:
 
 permissions:
@@ -27,6 +27,7 @@ jobs:
           node-version: '22'
       - run: npm ci --ignore-scripts
       - run: npm test
+      - run: node scripts/fetch-themes.js
       - run: node scripts/build-pages.js dist
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

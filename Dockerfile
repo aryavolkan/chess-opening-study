@@ -16,6 +16,9 @@ COPY server/ server/
 COPY shared/ shared/
 COPY scripts/ scripts/
 
+# lichess piece sets and board textures (their own licences; see public/themes/CREDITS.md)
+RUN node scripts/fetch-themes.js
+
 RUN mkdir -p /data && chown node:node /data
 USER node
 

@@ -1,4 +1,4 @@
-// Small per-browser preferences (engine on/off, book arrows, tree depth) in
+// Small per-browser preferences (engine on/off, board size, tree depth) in
 // localStorage. Every access is guarded: private windows and blocked storage
 // must never break the page, they just forget between visits.
 

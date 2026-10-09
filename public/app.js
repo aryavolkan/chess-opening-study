@@ -10,10 +10,12 @@ import { api } from '/api.js';
 import { createBoard } from '/board.js';
 import { EngineClient } from '/engine-client.js';
 import { renderTree, describeEval, resetColorCache, stripFamily } from '/tree.js';
+import { ORDERS, BRANCH_CAPS } from '/tree-model.js';
 import { renderEcoMap } from '/eco-map.js';
 import { Drill } from '/study.js';
 import { initTheme } from '/theme.js';
 import { createPrefs } from '/prefs.js';
+import { initBoardSettings } from '/board-theme.js';
 import { createGamesPanel } from '/games.js';
 import { createExplorerPanel } from '/explorer.js';
 
@@ -32,7 +34,6 @@ const state = {
   chess: new Chess(),
   orientation: 'white',
   engineOn: prefs.get('engineOn', true) !== false,
-  arrowsOn: prefs.get('arrowsOn', true) !== false,
   live: null,        // latest snapshot from the browser engine for the current epd
   liveEpd: null,
   analysis: new Map(),   // epd -> stored record (null when known to be absent)
@@ -44,7 +45,10 @@ const state = {
   ecoCodes: {},
   treePinned: null,
   treeDepth: clampDepth(prefs.get('treeDepth', 4)),
+  treeOrder: ORDERS.includes(prefs.get('treeOrder', 'eval')) ? prefs.get('treeOrder', 'eval') : 'eval',
+  treeBranches: BRANCH_CAPS.includes(prefs.get('treeBranches', 6)) ? prefs.get('treeBranches', 6) : 6,
   treeExpanded: new Set(),
+  treeShowAll: new Set(),  // nodes whose reply cap was lifted with "+N more"
   study: [],
   drillActive: false,
   deepen: null,
@@ -522,15 +526,6 @@ function renderBoard() {
 function boardShapes() {
   if (state.drillActive) return [];
   const shapes = [];
-  if (state.arrowsOn) {
-    const node = currentNode();
-    if (node) {
-      annotate(node);
-      for (const child of node.children.values()) {
-        if (child.uci) shapes.push({ orig: child.uci.slice(0, 2), dest: child.uci.slice(2, 4), brush: child.name ? 'green' : 'paleGreen' });
-      }
-    }
-  }
   const best = state.live?.lines?.[0]?.pv?.[0] || state.analysis.get(epdOf(state.chess.fen()))?.bestMove;
   if (best && state.engineOn) shapes.push({ orig: best.slice(0, 2), dest: best.slice(2, 4), brush: 'blue' });
   return shapes;
@@ -779,6 +774,10 @@ function renderTreeNow() {
   // First pass to learn which nodes are visible, fetch their analysis, and redraw.
   const visibleEpds = [];
   walk(root, (n) => { if (n.ply - root.ply <= state.treeDepth + 1 && n.epd) visibleEpds.push(n.epd); });
+  // The line on the board is always open, however deep it runs below the root.
+  for (let n = current; n && n !== root; n = n.parent) {
+    if (n.ply - root.ply > state.treeDepth) for (const c of n.children.values()) if (c.epd) visibleEpds.push(c.epd);
+  }
   fetchAnalysis(visibleEpds.slice(0, 4000)).then((changed) => { if (changed) renderTreeNow(); });
   fetchGames(visibleEpds.slice(0, 4000)).then((changed) => { if (changed) renderTreeNow(); });
   renderTree(svg, {
@@ -786,6 +785,9 @@ function renderTreeNow() {
     current,
     depth: state.treeDepth,
     expanded: state.treeExpanded,
+    order: state.treeOrder,
+    branches: state.treeBranches,
+    showAll: state.treeShowAll,
     analysis: state.analysis,
     workers: allWorkers(),
     games: state.gamesTotal ? state.games : null,
@@ -796,6 +798,11 @@ function renderTreeNow() {
         state.treeExpanded.add(node);
         annotate(node);
       }
+      renderTreeNow();
+    },
+    onShowAll: (node) => {
+      if (state.treeShowAll.has(node)) state.treeShowAll.delete(node);
+      else state.treeShowAll.add(node);
       renderTreeNow();
     },
     onHover: (e, node, a) => {
@@ -1166,11 +1173,11 @@ function bind() {
   $('nav-end').onclick = () => goTo(state.line.length);
   $('flip').onclick = () => { state.orientation = state.orientation === 'white' ? 'black' : 'white'; renderBoard(); };
   $('engine-toggle').checked = state.engineOn;
-  $('arrows-toggle').checked = state.arrowsOn;
   $('tree-depth').value = state.treeDepth;
+  $('tree-order').value = state.treeOrder;
+  $('tree-branches').value = String(state.treeBranches);
   // analyseCurrent() stops the running search when the engine is switched off, as long as liveEpd still marks it
   $('engine-toggle').onchange = (e) => { state.engineOn = e.target.checked; prefs.set('engineOn', state.engineOn); render(); };
-  $('arrows-toggle').onchange = (e) => { state.arrowsOn = e.target.checked; prefs.set('arrowsOn', state.arrowsOn); renderBoard(); };
   $('copy-link').onclick = () => copyText(location.href, 'link');
   $('copy-pgn').onclick = () => copyText(sanToPgn(state.line.slice(0, state.cursor)), 'PGN');
   $('copy-fen').onclick = () => copyText(state.chess.fen(), 'FEN');
@@ -1202,6 +1209,8 @@ function bind() {
   $('drill-all').onclick = () => startDrill(state.study);
   $('tree-pin').onchange = (e) => { state.treePinned = e.target.checked ? treeRoot() : null; renderTreeNow(); };
   $('tree-depth').onchange = (e) => { state.treeDepth = clampDepth(e.target.value); prefs.set('treeDepth', state.treeDepth); renderTreeNow(); };
+  $('tree-order').onchange = (e) => { state.treeOrder = e.target.value; prefs.set('treeOrder', state.treeOrder); renderTreeNow(); };
+  $('tree-branches').onchange = (e) => { state.treeBranches = Number(e.target.value); state.treeShowAll.clear(); prefs.set('treeBranches', state.treeBranches); renderTreeNow(); };
   $('tree-up').onclick = () => {
     const root = treeRoot();
     if (root.parent) { state.treePinned = root.parent; $('tree-pin').checked = true; renderTreeNow(); }
@@ -1247,6 +1256,7 @@ function bind() {
     else if (e.key === 'f') $('flip').click();
   });
   // Theme: the tree caches resolved colours, so it is redrawn whenever the shown theme changes.
+  initBoardSettings({ prefs });
   const theme = initTheme({ onChange: () => { resetColorCache(); renderTreeNow(); } });
   const seg = $('theme-seg');
   const syncSeg = () => seg.querySelectorAll('[data-theme-choice]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.themeChoice === theme.preference)));

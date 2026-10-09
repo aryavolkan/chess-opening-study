@@ -48,9 +48,15 @@ for (const eco of Object.values(epdEco)) (codes[eco] ||= { positions: 0, opening
 for (const op of book.openings) (codes[op.eco] ||= { positions: 0, openings: 0 }).openings++;
 writeFileSync(join(out, 'book-index.json'), JSON.stringify({ codes, epdEco }));
 
-// root-absolute URLs become relative so the site works under /<repo>/
+// root-absolute URLs become relative so the site works under /<repo>/. Front-end
+// modules that import shared code as '../shared/…' (so Node tests can load
+// them) sit at the top level here, next to shared/, so that becomes './shared/…'.
 function relativise(text, ext) {
-  if (ext === '.js') return text.replace(/(\bfrom\s+['"]|\bimport\(\s*['"]|ENGINE_URL\s*=\s*['"])\//g, '$1./');
+  if (ext === '.js') {
+    return text
+      .replace(/(\bfrom\s+['"]|\bimport\(\s*['"]|ENGINE_URL\s*=\s*['"])\//g, '$1./')
+      .replace(/(\bfrom\s+['"])\.\.\/shared\//g, '$1./shared/');
+  }
   if (ext === '.html') return text.replace(/\b(href|src)="\/(?!\/)/g, '$1="./');
   return text;
 }
