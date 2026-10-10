@@ -67,6 +67,7 @@ const serverApi = {
 
   gamesImports: () => request('GET', '/api/games/imports'),
   gamesImport: (file, { name, player, onProgress } = {}) => upload(`/api/games/import?${qs({ name, player })}`, file, onProgress),
+  gamesImportUrl: (url, { player } = {}) => request('POST', '/api/games/import-url', { url, player }),
   gamesDeleteImport: (id) => request('DELETE', `/api/games/imports/${id}`),
   gamesShare: (id, shared) => request('POST', `/api/games/imports/${id}/share`, { shared }),
   gamesPositions: (epds, filter) => request('POST', '/api/games/positions', { epds, ...filter }),

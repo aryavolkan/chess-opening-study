@@ -71,6 +71,23 @@ its games and its opening name. Games are deduplicated across imports, and
 each import can be removed again. Positions are indexed for the first 20
 moves (configurable); the full game is kept so it can be put on the board.
 
+**Tournaments from chess-results.com.** Paste a tournament's link (or just
+its number) on the Games tab and the server fetches its games from
+[chess-results.com](https://chess-results.com), where most over-the-board
+tournaments are published, and imports them as one import named after the
+tournament. This works when the organiser uploaded the games: the site's
+game search then offers them as a PGN download, which the app drives for
+you; when there are none, the import says so. The address of any PGN file
+works the same way (a lichess broadcast's PGN, a federation's archive). The
+fetched tournament is then selected in "Games from", so the opening chart,
+the ECO map, the game list and the counts on the board and in the tree show
+that tournament alone: which openings were played in it, how each scored,
+and what was played from the position on the board. The same selector
+switches to any other import or back to all of them, and each import's name
+in the list does the same. Files are decoded as UTF-8, or as Windows-1252
+when they are not valid UTF-8 (which is what Swiss-Manager writes), so
+accented names survive. The server only fetches public internet addresses.
+
 **Public contributor workers.** On the Analysis tab, anyone can get a token
 and run `server/public-worker.js` on their own computer. The worker connects
 to the app, pulls the shallowest book positions, analyses them with its own
@@ -159,6 +176,14 @@ The same import is available over HTTP, which is handy for scripting:
 
 ```sh
 curl --data-binary @games.pgn 'http://127.0.0.1:3000/api/games/import?name=games&player=myname'
+```
+
+Fetch a chess-results.com tournament (by link or number) or the PGN at any
+address, without the web server or over HTTP:
+
+```sh
+npm run import-url -- https://chess-results.com/tnr37569.aspx --player myname
+curl -H 'Content-Type: application/json' -d '{"url":"37569","player":"myname"}' http://127.0.0.1:3000/api/games/import-url
 ```
 
 Import speed is around 1,300 games per second on one core (positions are
@@ -284,7 +309,9 @@ shared/pgn.js          streaming PGN reader: chunks in, games out
 server/openings.js     loads the book, computes the position of every node
 server/db.js           SQLite: analysis, study_lines, settings, imports, games, game_positions
 server/games.js        PGN import: replay with chessops, classify by book position, index positions
+server/chess-results.js games from a URL: drives chess-results.com's game search for a tournament's PGN; public hosts only
 scripts/import-pgn.js  the same import from the command line
+scripts/import-url.js  fetch and import a tournament or PGN address from the command line
 server/engine.js       Stockfish in Node with analyse(fen, {depth, multipv})
 server/deepener.js     background queue that raises stored depth
 server/engine-pool.js  pool of engine worker processes (engine-worker.js) with a request queue
@@ -315,6 +342,7 @@ Dockerfile             image used by docker-compose.yml and the publish workflow
 | GET/POST | `/api/deepen`, `/start`, `/stop`, `/configure`, `/prioritize`, `/next` | server deepener |
 | GET/POST/DELETE | `/api/study`, `/api/study/:id`, `/api/study/:id/result` | study set and drill results |
 | POST | `/api/games/import?name=&player=&plies=` | body = the PGN (gzip detected); streams, one import at a time |
+| POST | `/api/games/import-url` | `{url, player?, name?, plies?}`: the server fetches a chess-results.com tournament (link or number) or a PGN address and imports it; 404 when the tournament has no games |
 | GET/DELETE | `/api/games/imports`, `/api/games/imports/:id` | imports, totals and the running import's progress |
 | POST | `/api/games/positions` | `{epds[], player?, color?}` -> games / results per position |
 | GET | `/api/games/position?epd=` | one position with the moves played from it |
@@ -337,7 +365,9 @@ ever return games the viewer may see.
 
 Game queries take `player=` (a name as it appears in the PGN, case-insensitive)
 and `color=white|black`; results then come with `wins` and `losses` from that
-player's point of view in addition to `white`, `draws` and `black`.
+player's point of view in addition to `white`, `draws` and `black`. They
+also take `import=` (an import's id) to look at one import or tournament
+only.
 
 Explorer results carry, per opening: `eval` and `worst` (centipawns, your
 point of view), `decisions` (positions to learn), `moves` (distinct moves of

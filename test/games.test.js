@@ -4,7 +4,7 @@ import { Readable } from 'node:stream';
 import { gzipSync } from 'node:zlib';
 import { openDb } from '../server/db.js';
 import { loadOpenings } from '../server/openings.js';
-import { Importer, replayGame, makeCache, familyOf, clampPlies } from '../server/games.js';
+import { Importer, replayGame, makeCache, familyOf, clampPlies, pickDecoder } from '../server/games.js';
 import { findNode } from '../shared/book.js';
 import { epdOf } from '../shared/fen.js';
 
@@ -237,6 +237,30 @@ test('gzip input, chunked input, illegal moves, maxPlies and one import at a tim
   // no games at all is fine: an empty import
   const none = await importText(importer, '\n\n');
   assert.equal(none.games, 0);
+  store.close();
+});
+
+test('text encoding: UTF-8 by default, Windows-1252 when the file is not UTF-8, or as asked', async () => {
+  const store = openDb();
+  const importer = new Importer({ store, book });
+  const utf8 = game('Müller, Jürgen', 'Pérez, José', '1-0', '1. e4 e5');
+  let r = await importText(importer, utf8, { sourceUrl: 'https://example.org/t.pgn' });
+  assert.equal(r.games, 1);
+  assert.equal(r.source, 'https://example.org/t.pgn');
+  assert.equal(store.listGames({ importId: r.id }).games[0].white, 'Müller, Jürgen');
+  r = await importer.importStream(Readable.from([Buffer.from(utf8.replace('e4 e5', 'd4 d5'), 'latin1')]), { name: 'latin1' });
+  assert.equal(r.games, 1);
+  assert.equal(r.source, null);
+  const g = store.listGames({ importId: r.id }).games[0];
+  assert.equal(g.white, 'Müller, Jürgen', 'sniffed as Windows-1252');
+  assert.equal(g.black, 'Pérez, José');
+  r = await importer.importStream(Readable.from([Buffer.from(utf8.replace('e4 e5', 'c4 c5'), 'latin1')]), { name: 'forced', encoding: 'utf-8' });
+  assert.notEqual(store.listGames({ importId: r.id }).games[0].white, 'Müller, Jürgen', 'the asked-for encoding is used as is');
+  r = await importer.importStream(Readable.from([Buffer.from(utf8.replace('e4 e5', 'Nf3 d5'))]), { name: 'bogus', encoding: 'no-such-encoding' });
+  assert.equal(store.listGames({ importId: r.id }).games[0].white, 'Müller, Jürgen', 'an unknown encoding falls back to sniffing');
+  assert.equal(pickDecoder(Buffer.from('plain')).encoding, 'utf-8');
+  assert.equal(pickDecoder(Buffer.from([0x4d, 0xfc, 0x6c])).encoding, 'windows-1252');
+  assert.equal(pickDecoder(Buffer.from('Mü').subarray(0, 2)).encoding, 'utf-8', 'a multi-byte character cut at the chunk boundary is not an error');
   store.close();
 });
 

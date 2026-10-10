@@ -134,14 +134,19 @@
           <input type="text" id="import-player" placeholder="your name in the PGN (optional)" autocomplete="off" title="Results are then shown from this player's point of view">
           <button type="submit" class="btn primary" id="import-start" disabled>Import</button>
         </form>
+        <form id="import-url-form" class="import-form import-url-form">
+          <input type="text" id="import-url" placeholder="chess-results.com tournament link or number, or the address of a PGN file" autocomplete="off" spellcheck="false" title="The server fetches the tournament's games from chess-results.com (when the organiser uploaded them) or the PGN at this address">
+          <button type="submit" class="btn primary" id="import-url-start" disabled>Fetch tournament</button>
+        </form>
         <div class="import-progress" id="import-progress" hidden>
           <div class="progress"><div id="import-bar"></div></div>
           <div class="hint" id="import-status"></div>
         </div>
         <ul class="import-list" id="import-list"></ul>
-        <p class="hint" id="games-empty">Import a PGN file (your lichess or chess.com export, a tournament, a whole database; .gz is fine) to see which openings it contains, how they scored, and how often each book move was played. Drop the file here or choose it above.</p>
+        <p class="hint" id="games-empty">Import a PGN file (your lichess or chess.com export, a tournament, a whole database; .gz is fine) or paste a chess-results.com tournament link to see which openings were played, how they scored, and how often each book move was played. Drop the file here or choose it above.</p>
         <div id="games-overview" hidden>
           <div class="filter-row">
+            <label>Games from <select id="games-import" title="Narrow everything below, and the game counts on the board and in the tree, to one import or tournament"><option value="">all imports</option></select></label>
             <label>Results for <select id="games-player"><option value="">both sides</option></select></label>
             <div class="seg" id="games-color-seg" role="radiogroup" aria-label="Colour" hidden>
               <button type="button" role="radio" aria-checked="true" data-color="">both colours</button>

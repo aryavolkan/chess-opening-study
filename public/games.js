@@ -1,7 +1,9 @@
-// Games tab: import PGN files and show which openings they contain. Owns the
-// import form (upload with progress, polling the server while it parses),
-// the list of imports, the perspective filter (whose results, as which
-// colour), the opening chart, the ECO frequency map and the game list. The
+// Games tab: import PGN files and tournaments and show which openings they
+// contain. Owns the import forms (a file upload with progress, or a
+// chess-results.com tournament or PGN address the server fetches, polling
+// the server while it parses), the list of imports, the filters (one import
+// or all, whose results, as which colour), the opening chart, the ECO
+// frequency map and the game list. The
 // main controller supplies the board: it is told which line or game to show
 // and which filter is active, and it asks for the current position.
 
@@ -34,6 +36,8 @@ export function createGamesPanel({ api, prefs, hooks }) {
     canShare: false,
     player: prefs.get('gamesPlayer', null), // null = never chosen: follow the newest import
     color: prefs.get('gamesColor', '') || '',
+    importId: null, // one import (a tournament) to look at, or null for all of them
+    fetching: null, // the address the server is fetching games from, while it does
     by: ['family', 'opening', 'eco'].includes(prefs.get('gamesBy')) ? prefs.get('gamesBy') : 'family',
     summary: null,
     eco: null,
@@ -53,17 +57,39 @@ export function createGamesPanel({ api, prefs, hooks }) {
     return withPlayer ? withPlayer.player : '';
   }
 
-  /** The player / colour perspective as API parameters. */
+  /** The import / player / colour filter as API parameters. */
   function filter() {
     const p = player();
-    return p ? { player: p, color: st.color || undefined } : {};
+    const f = p ? { player: p, color: st.color || undefined } : {};
+    if (st.importId) f.import = st.importId;
+    return f;
   }
 
   function perspective() {
     return Boolean(player());
   }
 
+  /** The import being looked at, or null for all of them. */
+  function selectedImport() {
+    return st.importId ? st.imports.find((i) => i.id === st.importId) || null : null;
+  }
+
   function renderFilter() {
+    if (st.importId && !selectedImport()) st.importId = null; // removed, or no longer visible
+    const imps = $('games-import');
+    imps.innerHTML = '';
+    const all = document.createElement('option');
+    all.value = '';
+    all.textContent = 'all imports';
+    imps.appendChild(all);
+    for (const imp of st.imports) {
+      const opt = document.createElement('option');
+      opt.value = String(imp.id);
+      opt.textContent = `${shorten(imp.name, 48)} (${fmt(imp.games)})`;
+      imps.appendChild(opt);
+    }
+    imps.value = st.importId ? String(st.importId) : '';
+    imps.parentElement.hidden = st.imports.length < 2 && !st.importId;
     const sel = $('games-player');
     const names = [...new Set(st.imports.map((i) => i.player).filter(Boolean))];
     const current = player();
@@ -131,9 +157,13 @@ export function createGamesPanel({ api, prefs, hooks }) {
       const shareLink = st.canShare && imp.own
         ? `<button class="link" data-share="${imp.shared ? 0 : 1}" title="${imp.shared ? 'Stop sharing these games with visitors' : 'Let everyone who opens this site see these games'}">${imp.shared ? 'make private' : 'share with everyone'}</button>`
         : '';
-      li.innerHTML = `<span class="imp-name" title="${esc(imp.name)}">${esc(imp.name)}${imp.shared ? ' <span class="badge good" title="Visible to everyone who opens this site">shared</span>' : ''}${imp.own ? '' : ' <span class="badge" title="Shared by this site">site</span>'}</span>
+      const source = imp.source && /^https?:\/\//.test(imp.source)
+        ? ` <a class="ext" href="${esc(imp.source)}" target="_blank" rel="noopener" title="Fetched from ${esc(imp.source)}">${/chess-results\.com/i.test(imp.source) ? 'chess-results' : 'source'} ↗</a>`
+        : '';
+      li.innerHTML = `<span class="imp-name" title="${esc(imp.name)}"><button class="link name" data-select="${imp.id}" title="Show the openings of this import only">${esc(imp.name)}</button>${source}${imp.shared ? ' <span class="badge good" title="Visible to everyone who opens this site">shared</span>' : ''}${imp.own ? '' : ' <span class="badge" title="Shared by this site">site</span>'}</span>
         <span class="imp-meta">${fmt(imp.games)} games${imp.player ? ` · ${esc(imp.player)}` : ''} · ${esc(when)}${notes.length ? ` · <span class="${imp.error ? 'warn' : ''}">${esc(notes.join(' · '))}</span>` : ''}${shareLink ? ` · ${shareLink}` : ''}</span>
         ${imp.own ? `<button class="link" data-remove="${imp.id}" title="Remove this import and its games">✕</button>` : ''}`;
+      li.querySelector('[data-select]').onclick = () => selectImport(st.importId === imp.id ? null : imp.id);
       li.querySelector('[data-share]')?.addEventListener('click', async (e) => {
         try {
           await api.gamesShare(imp.id, e.target.dataset.share === '1');
@@ -146,6 +176,7 @@ export function createGamesPanel({ api, prefs, hooks }) {
         if (!confirm(`Remove "${imp.name}" and its ${fmt(imp.games)} games?`)) return;
         try {
           await api.gamesDeleteImport(imp.id);
+          if (st.importId === imp.id) st.importId = null;
           hooks.flash('Import removed');
           await dataChanged();
         } catch (err) {
@@ -157,6 +188,7 @@ export function createGamesPanel({ api, prefs, hooks }) {
     const total = st.total.games;
     $('games-total').textContent = total ? `${fmt(total)} games · indexed to move ${Math.ceil(st.total.plies / 2)}` : '';
     $('import-form').hidden = !st.canImport;
+    $('import-url-form').hidden = !st.canImport;
     $('import-signin').hidden = st.canImport;
     $('games-empty').hidden = total > 0 || st.imports.length > 0 || !st.canImport;
     $('games-overview').hidden = total === 0;
@@ -164,7 +196,7 @@ export function createGamesPanel({ api, prefs, hooks }) {
 
   function renderProgress() {
     const box = $('import-progress');
-    if (!st.uploading && !st.running) {
+    if (!st.uploading && !st.fetching && !st.running) {
       box.hidden = true;
       return;
     }
@@ -172,9 +204,48 @@ export function createGamesPanel({ api, prefs, hooks }) {
     const r = st.running;
     const parts = [];
     if (st.uploading) parts.push(`uploading ${Math.round(100 * (st.uploadFraction || 0))}%`);
+    if (st.fetching) parts.push(r ? `fetching ${r.name}` : `fetching from ${st.fetching}…`);
     if (r) parts.push(`${fmt(r.games)} games stored${r.duplicates ? `, ${fmt(r.duplicates)} duplicates` : ''}`);
     $('import-status').textContent = parts.join(' · ');
-    $('import-bar').style.width = `${Math.round(100 * (st.uploadFraction || 0))}%`;
+    $('import-bar').style.width = st.fetching ? (r ? '100%' : '0') : `${Math.round(100 * (st.uploadFraction || 0))}%`;
+    $('import-bar').classList.toggle('busy', Boolean(st.fetching && !r));
+  }
+
+  /** Fetch a chess-results.com tournament (or a PGN address) through the server. */
+  async function startUrlImport(e) {
+    e.preventDefault();
+    const url = $('import-url').value.trim();
+    if (!url || st.fetching || st.uploading) return;
+    const playerName = $('import-player').value.trim();
+    st.fetching = /^\d+$/.test(url) ? 'chess-results.com' : (() => { try { return new URL(/^[a-z]+:\/\//i.test(url) ? url : `https://${url}`).hostname; } catch { return url; } })();
+    $('import-url-start').disabled = true;
+    renderProgress();
+    schedulePoll();
+    try {
+      const { import: record } = await api.gamesImportUrl(url, { player: playerName || undefined });
+      const secs = (record.ms / 1000).toFixed(record.ms < 10000 ? 1 : 0);
+      hooks.flash(`Imported ${fmt(record.games)} games of ${record.name} in ${secs} s${record.duplicates ? ` (${fmt(record.duplicates)} duplicates skipped)` : ''}`);
+      // Look at the tournament that was just fetched: from the named player's
+      // point of view, or from both sides (a remembered name would hide it).
+      st.player = playerName;
+      prefs.set('gamesPlayer', playerName);
+      st.importId = record.id;
+      $('import-url').value = '';
+    } catch (err) {
+      hooks.flash(err.message);
+    } finally {
+      st.fetching = null;
+      $('import-url-start').disabled = !$('import-url').value.trim();
+      clearTimeout(st.pollTimer);
+      renderProgress();
+      await dataChanged();
+    }
+  }
+
+  /** Look at one import only (null: all), everywhere in the app. */
+  function selectImport(id) {
+    st.importId = id;
+    filterChanged();
   }
 
   async function startImport(e) {
@@ -247,8 +318,9 @@ export function createGamesPanel({ api, prefs, hooks }) {
     const t = st.summary.total;
     const persp = perspective();
     const top = st.summary.groups[0];
+    const imp = selectedImport();
     const tiles = [
-      [fmt(t.games), persp ? `games of ${player()}${st.color ? ` as ${st.color}` : ''}` : 'games'],
+      [fmt(t.games), `games${persp ? ` of ${player()}${st.color ? ` as ${st.color}` : ''}` : ''}${imp ? ` in ${shorten(imp.name, 40)}` : ''}`],
       [t.games ? pct(score(t)) : '–', persp ? 'score' : "White's score"],
       [t.games ? pct(t.draws / t.games) : '–', 'draws'],
     ];
@@ -426,6 +498,9 @@ export function createGamesPanel({ api, prefs, hooks }) {
       $('import-start').disabled = !st.file;
     };
     $('import-form').onsubmit = startImport;
+    $('import-url-form').onsubmit = startUrlImport;
+    $('import-url').oninput = (e) => { $('import-url-start').disabled = !e.target.value.trim() || Boolean(st.fetching); };
+    $('games-import').onchange = (e) => selectImport(e.target.value ? Number(e.target.value) : null);
     $('games-player').onchange = (e) => {
       st.player = e.target.value;
       prefs.set('gamesPlayer', st.player);

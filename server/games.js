@@ -51,7 +51,7 @@ export class Importer {
    * Import every game in `source` (a Readable of bytes, gzip detected
    * automatically) as one import. Resolves with the finished import record.
    */
-  async importStream(source, { name = 'PGN import', player = null, maxPlies = DEFAULT_MAX_PLIES, gzip = false, onProgress, scope = localScope(), maxBytes = DEFAULT_MAX_BYTES } = {}) {
+  async importStream(source, { name = 'PGN import', player = null, maxPlies = DEFAULT_MAX_PLIES, gzip = false, onProgress, scope = localScope(), maxBytes = DEFAULT_MAX_BYTES, sourceUrl = null, encoding = 'auto' } = {}) {
     if (this.current) {
       const err = new Error('an import is already running');
       err.status = 409;
@@ -59,13 +59,17 @@ export class Importer {
     }
     const plies = clampPlies(maxPlies);
     const playerName = player && String(player).trim() ? String(player).trim().slice(0, 100) : null;
-    const id = this.store.createImport({ name: String(name).slice(0, 200), player: playerName, plies }, scope);
+    const id = this.store.createImport({ name: String(name).slice(0, 200), player: playerName, plies, source: sourceUrl ? String(sourceUrl).slice(0, 500) : null }, scope);
     const owner = { userId: scope.user ?? 0, shared: false };
     const cur = { id, name, games: 0, duplicates: 0, invalid: 0, positions: 0, bytes: 0, startedAt: new Date().toISOString(), t0: Date.now() };
     this.current = cur;
     if (!this.cache) this.cache = makeCache(this.book);
     const parser = new PgnParser();
-    const decoder = new TextDecoder('utf-8');
+    let decoder = null; // chosen from the first chunk (see pickDecoder)
+    const decode = (chunk) => {
+      if (!decoder) decoder = pickDecoder(chunk, encoding);
+      return decoder.decode(chunk, { stream: true });
+    };
     let pending = [];
     let error = null;
     const flush = () => {
@@ -81,7 +85,7 @@ export class Importer {
       for await (const chunk of bytes(source, gzip)) {
         cur.bytes += chunk.length;
         if (cur.bytes > maxBytes) throw new Error(`the file is larger than ${Math.round(maxBytes / 1e6)} MB; stopped there`);
-        pending.push(...parser.push(decoder.decode(chunk, { stream: true })));
+        pending.push(...parser.push(decode(chunk)));
         while (pending.length >= BATCH) {
           const rest = pending.splice(BATCH);
           flush();
@@ -89,7 +93,7 @@ export class Importer {
           await new Promise((r) => setImmediate(r));
         }
       }
-      pending.push(...parser.push(decoder.decode()));
+      if (decoder) pending.push(...parser.push(decoder.decode()));
       pending.push(...parser.end());
       flush();
     } catch (err) {
@@ -171,6 +175,28 @@ export function familyOf(name) {
 function namedAncestor(node) {
   for (let n = node; n; n = n.parent) if (n.name) return n;
   return null;
+}
+
+/**
+ * The text decoder for an import: the encoding asked for, or ('auto') UTF-8
+ * unless the first chunk is not valid UTF-8, in which case Windows-1252,
+ * which is what Swiss-Manager (and so chess-results.com) and older database
+ * programs write, so that names with accents survive.
+ */
+export function pickDecoder(firstChunk, encoding = 'auto') {
+  if (encoding && encoding !== 'auto') {
+    try {
+      return new TextDecoder(encoding);
+    } catch {
+      // unknown label: sniff instead
+    }
+  }
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(firstChunk, { stream: true });
+    return new TextDecoder('utf-8');
+  } catch {
+    return new TextDecoder('windows-1252');
+  }
 }
 
 export function clampPlies(v) {

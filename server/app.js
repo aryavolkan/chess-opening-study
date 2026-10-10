@@ -14,6 +14,7 @@ import { gzipSync } from 'node:zlib';
 import { nearestName } from '../shared/book.js';
 import { epdOf } from '../shared/fen.js';
 import { Importer } from './games.js';
+import { openGamesUrl } from './chess-results.js';
 import { createAuth } from './auth.js';
 import { PublicWorkerPool } from './public-worker-pool.js';
 
@@ -51,7 +52,7 @@ function vendorRoots() {
 
 const MAX_BODY = 2 * 1024 * 1024;
 
-export function createApp({ store, book, deepener, explorer = null, publicWorkers = null, importer = new Importer({ store, book }), auth = createAuth({ store }), log = () => {} }) {
+export function createApp({ store, book, deepener, explorer = null, publicWorkers = null, importer = new Importer({ store, book }), auth = createAuth({ store }), fetchImpl = globalThis.fetch, log = () => {} }) {
   const vendors = vendorRoots();
   const openingsPayload = JSON.stringify({
     count: book.openings.length,
@@ -198,6 +199,33 @@ export function createApp({ store, book, deepener, explorer = null, publicWorker
       }
       return { import: record };
     }, { ...USER, raw: true }],
+    // The server fetches the games: a chess-results.com tournament (link or
+    // number; its game search is driven for the PGN) or the address of a PGN
+    // file. The import is named after the tournament unless `name` is given.
+    ['POST', /^\/api\/games\/import-url$/, async (req) => {
+      const b = req.body || {};
+      if (typeof b.url !== 'string' || !b.url.trim()) throw httpError(400, 'url required');
+      if (importer.status()) throw httpError(409, 'an import is already running');
+      if (!auth.rateLimit(`import-url:${req.user.id}`, 20, 60000)) throw httpError(429, 'too many fetches, slow down');
+      const opened = await openGamesUrl(b.url, { fetch: fetchImpl });
+      let record;
+      try {
+        record = await importer.importStream(opened.body, {
+          name: typeof b.name === 'string' && b.name.trim() ? b.name.trim() : opened.name,
+          player: typeof b.player === 'string' ? b.player : null,
+          maxPlies: b.plies !== undefined ? Number(b.plies) : undefined,
+          sourceUrl: opened.source,
+          scope: req.scope,
+        });
+      } finally {
+        opened.body.destroy();
+      }
+      if (record.games === 0 && record.duplicates === 0) {
+        store.deleteImport(record.id);
+        throw httpError(400, record.error ? `import failed: ${record.error}` : `no games found at ${opened.source}`);
+      }
+      return { import: record, source: opened.source, tournament: opened.tournament };
+    }, USER],
     ['DELETE', /^\/api\/games\/imports\/(\d+)$/, (req, res, m) => {
       const id = Number(m[1]);
       if (importer.status()?.id === id) throw httpError(409, 'this import is still running');
