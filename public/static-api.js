@@ -173,6 +173,7 @@ export const staticApi = {
 
   gamesImports: async () => noGames,
   gamesImport: async () => { throw unavailable('Importing games'); },
+  gamesImportUrl: async () => { throw unavailable('Importing games'); },
   gamesDeleteImport: async () => { throw unavailable('Importing games'); },
   gamesShare: async () => { throw unavailable('Importing games'); },
   gamesPositions: async () => ({ positions: {} }),

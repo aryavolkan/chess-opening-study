@@ -13,7 +13,8 @@
     "deepen": "node --disable-warning=ExperimentalWarning scripts/deepen.js",
     "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js",
     "fetch-openings": "node scripts/fetch-openings.js",
-    "import-pgn": "node --disable-warning=ExperimentalWarning scripts/import-pgn.js"
+    "import-pgn": "node --disable-warning=ExperimentalWarning scripts/import-pgn.js",
+    "import-url": "node --disable-warning=ExperimentalWarning scripts/import-url.js"
   },
   "dependencies": {
     "@lichess-org/chessground": "^10.2.0",

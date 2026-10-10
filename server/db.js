@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS imports (
   shared      INTEGER NOT NULL DEFAULT 0,
   name        TEXT NOT NULL,
   player      TEXT,
+  source      TEXT,
   games       INTEGER NOT NULL DEFAULT 0,
   positions   INTEGER NOT NULL DEFAULT 0,
   duplicates  INTEGER NOT NULL DEFAULT 0,
@@ -224,6 +225,7 @@ function migrate(db) {
   add('analysis', 'user_id', 'INTEGER');
   add('imports', 'user_id', 'INTEGER NOT NULL DEFAULT 0');
   add('imports', 'shared', 'INTEGER NOT NULL DEFAULT 0');
+  add('imports', 'source', 'TEXT');
   add('games', 'user_id', 'INTEGER NOT NULL DEFAULT 0');
   add('games', 'shared', 'INTEGER NOT NULL DEFAULT 0');
   add('explore_jobs', 'user_id', 'INTEGER NOT NULL DEFAULT 0');
@@ -287,7 +289,7 @@ export class Store {
       deleteUserSessions: db.prepare('DELETE FROM sessions WHERE user_id = ?'),
       purgeSessions: db.prepare('DELETE FROM sessions WHERE expires_at < ?'),
 
-      insertImport: db.prepare('INSERT INTO imports (user_id, name, player, plies, created_at) VALUES (?, ?, ?, ?, ?)'),
+      insertImport: db.prepare('INSERT INTO imports (user_id, name, player, plies, source, created_at) VALUES (?, ?, ?, ?, ?, ?)'),
       finishImport: db.prepare(`UPDATE imports SET games = ?, positions = ?, duplicates = ?, invalid = ?, bytes = ?, ms = ?, error = ?, finished = 1
         WHERE id = ?`),
       getImport: db.prepare('SELECT * FROM imports WHERE id = ?'),
@@ -527,8 +529,9 @@ export class Store {
 
   // ---- imported games -------------------------------------------------
 
-  createImport({ name, player, plies }, scope = localScope()) {
-    const r = this.stmts.insertImport.run(ownerOf(scope), name, player || null, plies, new Date().toISOString());
+  /** `source` is where the games came from (a chess-results.com tournament page, a PGN address), or null for an uploaded file. */
+  createImport({ name, player, plies, source = null }, scope = localScope()) {
+    const r = this.stmts.insertImport.run(ownerOf(scope), name, player || null, plies, source || null, new Date().toISOString());
     return Number(r.lastInsertRowid);
   }
 
@@ -921,6 +924,7 @@ function rowToImport(row, scope = localScope()) {
     id: row.id,
     name: row.name,
     player: row.player,
+    source: row.source ?? null,
     games: row.games,
     positions: row.positions,
     duplicates: row.duplicates,

@@ -312,8 +312,15 @@ input[type=search], input[type=number] {
 .file-pick { position: relative; overflow: hidden; }
 .file-pick input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
 #panel-games.drop { outline: 2px dashed var(--accent); outline-offset: -4px; }
+.import-url-form { margin-top: 6px; }
+.import-url-form input[type=text] { flex: 1; min-width: 220px; }
 .import-progress { margin-top: 8px; }
 .import-progress .progress > div { background: var(--accent); }
+.import-progress .progress > div.busy { width: 30% !important; animation: import-busy 1.2s ease-in-out infinite alternate; }
+@keyframes import-busy { from { margin-left: 0; } to { margin-left: 70%; } }
+.import-list .imp-name .link.name { font: inherit; font-weight: 600; color: inherit; padding: 0; }
+.import-list .imp-name .link.name:hover { color: var(--accent); }
+.import-list .imp-name .ext { font-size: 11px; font-weight: 400; color: var(--accent); text-decoration: none; margin-left: 2px; }
 .import-list { list-style: none; margin: 8px 0 0; padding: 0; font-size: 12px; }
 .import-list li { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 4px 0; border-bottom: 1px solid var(--border); align-items: baseline; }
 .import-list .imp-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
